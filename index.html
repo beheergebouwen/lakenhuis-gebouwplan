@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lakenhuis Gebouwplan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+:root { padding-top: env(safe-area-inset-top, 0px) }
+/* Layout: drawing-office tool — sticky title strip, floor rail, plan sheet left, data panel right; tables in tabs. */
+:root {
+  --paper: #f3f4f1; --sheet: #ffffff; --ink: #1d2328; --muted: #5d6870; --line: #d6dad6; --line-strong: #b7bdb8;
+  --accent: #1f5f8b; --accent-ink: #ffffff; --accent-soft: #e3edf4;
+  --v: #b4232a; --g: #1f5fbf; --t: #5a5f63; --x: #24804a;
+  --ok: #1b7f3b; --warn: #a15c00; --bad: #b00020;
+  --kc: #ffd9a8; --dop: #c3e3c6; --hvg: #d3c6ec; --acc: #b2e6ef; --bhak: #f7c7cc; --ovm: #e6e2d6;
+  --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", Roboto, Arial, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #161a1d; --sheet: #1f2428; --ink: #e8ecee; --muted: #9aa6ad; --line: #323a40; --line-strong: #4a545b;
+  --accent: #7db7e0; --accent-ink: #10202c; --accent-soft: #233544;
+  --v: #ff7b80; --g: #7eb1ff; --t: #b4bcc1; --x: #6fd59a; --ok: #6fd59a; --warn: #f2b45a; --bad: #ff8a8a;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --paper: #161a1d; --sheet: #1f2428; --ink: #e8ecee; --muted: #9aa6ad; --line: #323a40; --line-strong: #4a545b;
+  --accent: #7db7e0; --accent-ink: #10202c; --accent-soft: #233544;
+  --v: #ff7b80; --g: #7eb1ff; --t: #b4bcc1; --x: #6fd59a; --ok: #6fd59a; --warn: #f2b45a; --bad: #ff8a8a;
+  color-scheme: dark }
+html, body { height: auto }
+body { background: var(--paper); color: var(--ink); font: 14px/1.45 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 32px }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--paper) }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0 }
+button, input, select, textarea { font: inherit; color: inherit }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums }
+.num { font-variant-numeric: tabular-nums; text-align: right }
+
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--paper);
+  display: flex; flex-wrap: wrap; align-items: end; gap: 8px 20px; padding-block: 16px 10px; border-bottom: 1px solid var(--line) }
+.brand { display: flex; flex-direction: column; gap: 2px; margin-right: auto; min-width: 0 }
+.brand h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.01em }
+.brand small { color: var(--muted); font-size: 12px }
+nav.tabs { display: flex; gap: 4px; flex-wrap: wrap }
+nav.tabs button { border: 1px solid var(--line); background: var(--sheet); padding: 6px 12px; border-radius: 999px; cursor: pointer; font-weight: 500 }
+nav.tabs button[aria-selected="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink) }
+.status { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong) }
+.dot.live { background: var(--ok) } .dot.ro { background: var(--warn) }
+
+.notice { margin-top: 12px; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--warn); background: var(--sheet); border-radius: var(--r); font-size: 13px }
+
+section.view { margin-top: 16px }
+.plan-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start }
+@media (max-width: 860px) { .plan-wrap { grid-template-columns: minmax(0, 1fr) } }
+.floor-rail { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px }
+.floor-rail button { border: 1px solid var(--line); background: var(--sheet); padding: 6px 10px; border-radius: var(--r); cursor: pointer; display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15 }
+.floor-rail button b { font-family: var(--f-display); font-size: 15px }
+.floor-rail button span { font-size: 11px; color: var(--muted) }
+.floor-rail button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft) }
+.tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px }
+.tools input[type=search] { flex: 1 1 200px; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--sheet) }
+.tools label { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted) }
+.sheet { background: #fff; border: 1px solid var(--line); border-radius: var(--r); overflow: auto; height: calc(100vh - 230px); min-height: 360px; position: relative }
+.sheet svg { display: block; width: 100%; height: auto; touch-action: manipulation }
+.zoombar { display: flex; gap: 4px; margin-left: auto }
+.zoombar button { width: 30px; height: 30px; border: 1px solid var(--line); background: var(--sheet); border-radius: var(--r); cursor: pointer; font-weight: 600 }
+.room { cursor: pointer; transition: fill-opacity .15s }
+.room path { stroke-width: 3.2; stroke-linejoin: round }
+.room path.o { fill-opacity: .5 } .room path.n { fill-opacity: .14 }
+.room:hover path { fill-opacity: .6 }
+.room.sel path { stroke-width: 6; fill-opacity: .7 }
+.room.dim path { fill-opacity: .06; stroke-opacity: .3 }
+.room text, .lbl text { font-family: var(--f-mono); font-weight: 600; font-size: 19px; paint-order: stroke; stroke: #fff; stroke-width: 5px }
+.lbl rect { fill: #fff }
+.door rect { fill: #e07a00 } .door text { fill: #fff; font: 600 14px var(--f-mono) }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 12px; color: var(--muted) }
+.legend i { display: inline-block; width: 18px; height: 11px; border-radius: 3px; border: 2px solid; vertical-align: -1px; margin-right: 5px }
+
+aside.panel { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 84px); display: flex; flex-direction: column; gap: 14px; min-width: 0 }
+.panel .empty { color: var(--muted) }
+.panel h2 { font-size: 20px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap }
+.panel h2 .mono { font-size: 15px; color: var(--accent) }
+.chips { display: flex; gap: 6px; flex-wrap: wrap }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper) }
+.chip.u-v { color: var(--v); border-color: currentColor } .chip.u-g { color: var(--g); border-color: currentColor }
+.chip.u-t { color: var(--t); border-color: currentColor } .chip.u-x { color: var(--x); border-color: currentColor }
+.chip.warn { color: var(--warn); border-color: currentColor } .chip.okc { color: var(--ok); border-color: currentColor }
+dl.kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 10px; margin: 0; font-size: 13px }
+dl.kv dt { color: var(--muted) } dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere }
+form.edit { display: grid; gap: 10px }
+form.edit .row { display: grid; gap: 4px }
+form.edit .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px }
+form.edit label { font-size: 12px; color: var(--muted); letter-spacing: .02em }
+form.edit input, form.edit select, form.edit textarea { padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--paper); min-width: 0 }
+form.edit textarea { min-height: 56px; resize: vertical }
+.check { display: flex; gap: 8px; align-items: center; font-size: 13px }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center }
+.btn { border: 1px solid var(--line-strong); background: var(--sheet); padding: 7px 14px; border-radius: var(--r); cursor: pointer; font-weight: 500 }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent) }
+.btn:disabled { opacity: .5; cursor: not-allowed }
+.saved { font-size: 12px; color: var(--ok) } .err { font-size: 12px; color: var(--bad) }
+.sub { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px }
+ul.mini { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px }
+ul.mini li { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px dashed var(--line); padding-bottom: 3px }
+ul.mini button { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-align: left }
+
+.tablebar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px }
+.tablebar h2 { font-size: 20px; margin-right: auto }
+.tablebar select, .tablebar input { padding: 6px 9px; border: 1px solid var(--line); border-radius: var(--r); background: var(--sheet); min-width: 0 }
+.tscroll { overflow-x: auto; background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r) }
+table { border-collapse: collapse; width: 100%; font-size: 13px }
+th, td { padding: 6px 9px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap }
+th { position: sticky; top: 0; background: var(--sheet); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600 }
+td.wrap { white-space: normal; min-width: 200px }
+tr.click { cursor: pointer } tr.click:hover td { background: var(--accent-soft) }
+td select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); max-width: 260px }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: 0 }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 14px }
+.card { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 4px }
+.card .k { font-size: 12px; color: var(--muted) } .card .v { font-family: var(--f-display); font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums }
+.bar { height: 8px; background: var(--paper); border-radius: 4px; overflow: hidden } .bar span { display: block; height: 100% }
+footer.foot { margin-top: 24px; font-size: 12px; color: var(--muted) }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+</head>
+<body>
+
+
+<header class="top">
+  <div class="brand">
+    <h1>Lakenhuis Gebouwplan</h1>
+    <small>Lakensestraat 76, 1000 Brussel · VZW De Overmolen</small>
+  </div>
+  <nav class="tabs" role="tablist" id="tabs">
+    <button role="tab" data-v="plan" aria-selected="true">Plan</button>
+    <button role="tab" data-v="rooms" aria-selected="false">Ruimten</button>
+    <button role="tab" data-v="doors" aria-selected="false">Deuren</button>
+    <button role="tab" data-v="ista" aria-selected="false">Ista-meters</button>
+    <button role="tab" data-v="orgs" aria-selected="false">Organisaties</button>
+  </nav>
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">Laden…</span><span id="who" style="margin-left:8px"></span><button class="btn" id="logout" hidden style="padding:2px 8px;font-size:12px">Afmelden</button></div>
+</header>
+<div class="notice" id="notice" hidden></div>
+
+<section class="view" id="v-plan">
+  <div class="plan-wrap">
+    <div style="min-width:0">
+      <div class="floor-rail" id="floors"></div>
+      <div class="tools">
+        <input type="search" id="q" placeholder="Zoek code, ruimte of organisatie…" aria-label="Zoeken">
+        <label><input type="checkbox" id="showDoors"> Deuren tonen</label>
+        <div class="zoombar"><button id="zOut" aria-label="Uitzoomen">−</button><button id="zFit" aria-label="Passend">⤢</button><button id="zIn" aria-label="Inzoomen">+</button></div>
+      </div>
+      <div class="sheet" id="sheet"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <aside class="panel" id="panel"><p class="empty">Klik op een ruimte in het plan om de gegevens te zien en aan te passen.</p></aside>
+  </div>
+</section>
+
+<section class="view" id="v-rooms" hidden>
+  <div class="tablebar"><h2>Ruimten</h2>
+    <select id="rFloor" aria-label="Verdieping"></select>
+    <select id="rOrg" aria-label="Organisatie"></select>
+    <input type="search" id="rQ" placeholder="Zoeken…" aria-label="Zoeken in ruimten">
+    <button class="btn" id="expRooms">Exporteer (CSV)</button></div>
+  <div class="tscroll"><table id="tRooms"></table></div>
+</section>
+
+<section class="view" id="v-doors" hidden>
+  <div class="tablebar"><h2>Deuren</h2>
+    <select id="dFloor" aria-label="Verdieping"></select>
+    <input type="search" id="dQ" placeholder="Zoeken…" aria-label="Zoeken in deuren">
+    <button class="btn" id="expDoors">Exporteer (CSV)</button></div>
+  <div class="tscroll"><table id="tDoors"></table></div>
+</section>
+
+<section class="view" id="v-ista" hidden>
+  <div class="tablebar"><h2>Ista-meters</h2>
+    <span class="chip" id="istaPeriod"></span>
+    <button class="btn" id="expIsta">Exporteer (CSV)</button></div>
+  <div class="cards" id="istaCards"></div>
+  <div class="tscroll"><table id="tIsta"></table></div>
+</section>
+
+<section class="view" id="v-orgs" hidden>
+  <div class="tablebar"><h2>Organisaties</h2><span class="chip">m²: gemeten, anders plan</span></div>
+  <div class="cards" id="orgCards"></div>
+  <div class="tscroll"><table id="tOrgs"></table></div>
+</section>
+
+<footer class="foot">Plannen: MVB Architects, grondplannen index g (14.10.2024) en bestaande toestand voorbouw (26.01.2022), gecontroleerd ter plaatse 16.10.2026. Codes: ruimte LK-[verdieping]-[nr], deur LK-D-[verdieping]-[nr], genummerd van straatzijde naar achterzijde.</footer>
+
+
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
+<script src="config.js"></script>
+<script src="graph.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

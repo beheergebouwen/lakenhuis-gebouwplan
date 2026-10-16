@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lakenhuis Gebouwplan – eenmalige installatie</title>
+<style>
+:root { --bg: #f3f4f1; --fg: #1d2328; --muted: #5d6870; --line: #d6dad6; --accent: #1f5f8b; --ok: #1b7f3b; --bad: #b00020 }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 "Segoe UI", Roboto, Arial, sans-serif; max-width: 760px; margin: 0 auto; padding: 32px 16px }
+h1 { font-size: 24px; margin: 0 0 6px } p { color: var(--muted) }
+button { font: inherit; padding: 9px 18px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer }
+button:disabled { opacity: .5; cursor: default }
+ol { padding-left: 20px } li { margin: 6px 0 }
+.ok { color: var(--ok) } .bad { color: var(--bad) } code { background: #fff; border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px }
+#log { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; margin-top: 18px; min-height: 60px; white-space: pre-wrap; font-family: Consolas, monospace; font-size: 13px }
+</style>
+</head>
+<body>
+<h1>Lakenhuis Gebouwplan – eenmalige installatie</h1>
+<p>Deze pagina maakt de SharePoint-lijsten aan, vult ze met de gegevens van 16/10/2026 (79 ruimten, 69 deuren, 33 Ista-meters) en zet de 6 plannen in de documentbibliotheek. Voer dit één keer uit, met een account dat lijsten mag aanmaken op de site.</p>
+<ol>
+  <li>Doelsite: <code id="site"></code></li>
+  <li>Lijsten: <code id="lists"></code></li>
+  <li>Plannen naar: <code id="folder"></code></li>
+</ol>
+<p><label for="files"><b>Kies de installatiebestanden</b> (seed.json + 6 × plan_*.jpg, uit de map setup van de zip):</label><br><input type="file" id="files" multiple accept=".json,.jpg"></p>
+<button id="go" disabled>Installatie starten</button>
+<div id="log">Aanmelden…</div>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
+<script src="config.js"></script>
+<script src="graph.js"></script>
+<script>
+(async () => {
+  const C = LK_CONFIG, log = (t, cls) => { const d = document.createElement('div'); d.textContent = t; if (cls) d.className = cls; document.getElementById('log').appendChild(d); };
+  document.getElementById('site').textContent = C.siteHostname + C.sitePath;
+  document.getElementById('lists').textContent = Object.values(C.lists).join(', ');
+  document.getElementById('folder').textContent = 'Documenten/' + C.planFolder;
+  try {
+    const me = await LK.login(); if (!me) return;
+    document.getElementById('log').textContent = ''; log('Aangemeld als ' + me.name + ' (' + me.user + '). Site gevonden.', 'ok');
+    document.getElementById('go').disabled = false;
+  } catch (e) { log('Aanmelden of site openen mislukt: ' + e.message, 'bad'); return; }
+  document.getElementById('go').onclick = async ev => {
+    ev.target.disabled = true;
+    try {
+      const F = {}; for (const f of document.getElementById('files').files) F[f.name] = f;
+      if (!F['seed.json']) { log('Kies eerst seed.json en de 6 plannen.', 'bad'); ev.target.disabled = false; return; }
+      const seed = JSON.parse(await F['seed.json'].text());
+      for (const k of ['rooms', 'doors', 'meters', 'orgs', 'settings']) {
+        const was = await LK.listId(k); const st = await LK.createList(k); log(C.lists[k] + ': ' + st);
+        if (was) { log('  → bestaat al, gegevens niet opnieuw toegevoegd (geen dubbels).'); continue; }
+        const rows = k === 'rooms' ? seed.rooms : k === 'doors' ? seed.doors : k === 'meters' ? seed.meters
+          : k === 'orgs' ? [['Kenniscentrum WWZ', '#ffd9a8'], ['DOP', '#c3e3c6'], ['Huis voor Gezondheid', '#d3c6ec'], ['Accolage', '#b2e6ef'], ['BHAK', '#f7c7cc'], ['De Overmolen', '#e6e2d6']].map(([name, color]) => ({ name, color, type: name === 'De Overmolen' ? 'Eigenaar' : 'Huurder' }))
+          : [{ key: 'ista', ...seed.settings }];
+        await new Promise(r => setTimeout(r, 1500));     // let SharePoint finish creating columns
+        await LK.addMany(k, rows, (n, t) => { if (n === t || n % 100 === 0) log('  → ' + n + ' / ' + t + ' rijen'); });
+      }
+      for (const f of ['k', 'f0', 'f2', 'f4', 'f6', 'f7']) {
+        const blob = F['plan_' + f + '.jpg']; if (!blob) { log('plan_' + f + '.jpg ontbreekt – overgeslagen', 'bad'); continue; } await LK.upload('plan_' + f + '.jpg', blob); log('Plan ' + f + ' geüpload');
+      }
+      log('Klaar. Open nu de app (index.html).', 'ok');
+    } catch (e) { log('Fout: ' + e.message, 'bad'); ev.target.disabled = false; }
+  };
+})();
+</script>
+</body>
+</html>
