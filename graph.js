@@ -6,6 +6,7 @@
     auth: { clientId: C.clientId, authority: 'https://login.microsoftonline.com/' + C.tenantId, redirectUri: location.origin + location.pathname.replace(/index\.html$/, '') },
     cache: { cacheLocation: 'localStorage' }
   });
+  const ready = msal.initialize();
   let account = null, siteId = null; const listIds = {};
 
   // Field mapping: app field -> SharePoint internal column name
@@ -44,6 +45,7 @@
 
   const API = {
     async login() {
+      await ready;
       const res = await msal.handleRedirectPromise();
       account = res?.account || msal.getAllAccounts()[0] || null;
       if (!account) { await msal.loginRedirect({ scopes: SCOPES }); return null; }
