@@ -126,6 +126,15 @@ td select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px;
 .bar { height: 8px; background: var(--paper); border-radius: 4px; overflow: hidden } .bar span { display: block; height: 100% }
 footer.foot { margin-top: 24px; font-size: 12px; color: var(--muted) }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+/* bezetting */
+.peil { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px }
+.peil input, .tablebar input[type=date] { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--line); border-radius: var(--r); background: var(--sheet); color: var(--ink) }
+.tablebar label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px }
+table.occ { width: 100%; border-collapse: collapse; font-size: 13px }
+table.occ th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 2px 4px }
+table.occ td { padding: 3px 4px; border-top: 1px solid var(--line) }
+table.occ tr.now td:first-child { font-weight: 600 }
+table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); width: 100% }
 </style>
 </head>
 <body>
@@ -143,6 +152,7 @@ footer.foot { margin-top: 24px; font-size: 12px; color: var(--muted) }
     <button role="tab" data-v="ista" aria-selected="false">Ista-meters</button>
     <button role="tab" data-v="orgs" aria-selected="false">Organisaties</button>
   </nav>
+  <label class="peil" title="Toon wie waar zat op deze datum">Peildatum <input type="date" id="peil"></label>
   <div class="status"><span class="dot" id="dot"></span><span id="statusText">Laden…</span><span id="who" style="margin-left:8px"></span><button class="btn" id="logout" hidden style="padding:2px 8px;font-size:12px">Afmelden</button></div>
 </header>
 <div class="notice" id="notice" hidden></div>
@@ -189,7 +199,10 @@ footer.foot { margin-top: 24px; font-size: 12px; color: var(--muted) }
 </section>
 
 <section class="view" id="v-orgs" hidden>
-  <div class="tablebar"><h2>Organisaties</h2><span class="chip">m²: gemeten, anders plan</span></div>
+  <div class="tablebar"><h2>Organisaties</h2>
+    <label>Van <input type="date" id="pFrom"></label><label>Tot <input type="date" id="pTo"></label>
+    <button class="btn" id="pIsta">Ista-periode</button><button class="btn" id="pYear">Kalenderjaar</button>
+    <span class="chip">m²: gemeten, anders plan</span><button class="btn" id="expOcc">Bezetting exporteren (CSV)</button></div>
   <div class="cards" id="orgCards"></div>
   <div class="tscroll"><table id="tOrgs"></table></div>
 </section>
@@ -198,8 +211,8 @@ footer.foot { margin-top: 24px; font-size: 12px; color: var(--muted) }
 
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=3"></script>
-<script src="graph.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="config.js?v=4"></script>
+<script src="graph.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
