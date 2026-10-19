@@ -41,7 +41,7 @@ try { const t = localStorage.getItem('lk.floor'); if (t) floor = t; } catch (e) 
 // ---------- data
 function setStatus(kind, text) { $('#dot').className = 'dot ' + kind; $('#statusText').textContent = text; }
 async function boot() {
-  GEO = await fetch('geo.json').then(r => r.json());
+  GEO = await fetch('geo.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json());
   if (!GEO.floors.some(f => f.id === floor)) floor = 'f2';
   setStatus('', 'Aanmelden bij Microsoft 365…');
   const me = await LK.login(); if (!me) return;            // redirecting to login
