@@ -99,10 +99,10 @@ function buildStatic() {
   $('#zFit').onclick = () => { zoom = 1; applyZoom(); };
   $('#peil').value = peil; $('#peil').onchange = e => { if (e.target.value) { peil = e.target.value; renderAll(); } };
   $('#pFrom').value = per.from; $('#pTo').value = per.to;
-  const setPer = () => { if ($('#pFrom').value && $('#pTo').value && $('#pFrom').value <= $('#pTo').value) { per = { from: $('#pFrom').value, to: $('#pTo').value }; renderOrgs(); } };
+  const setPer = () => setPeriod($('#pFrom').value, $('#pTo').value);
   $('#pFrom').onchange = setPer; $('#pTo').onchange = setPer;
-  $('#pIsta').onclick = () => { per = istaPeriod(); $('#pFrom').value = per.from; $('#pTo').value = per.to; renderOrgs(); };
-  $('#pYear').onclick = () => { const y = peil.slice(0, 4); per = { from: y + '-01-01', to: y + '-12-31' }; $('#pFrom').value = per.from; $('#pTo').value = per.to; renderOrgs(); };
+  $('#pIsta').onclick = () => { const I = istaPeriod(); setPeriod(I.from, I.to); };
+  $('#pYear').onclick = () => { const y = peil.slice(0, 4); setPeriod(y + '-01-01', y + '-12-31'); };
   $('#expOcc').onclick = () => exportCsv('Lakenhuis_bezetting.csv', ['ruimtecode', 'ruimte', 'organisatie', 'van', 'tot', 'opmerking'],
     [...OCC].sort((a, b) => a.room.localeCompare(b.room) || (a.from || '').localeCompare(b.from || '')).map(o => [o.room, roomOf(o.room)?.name || '', o.org, dfmt(o.from) || 'onbekend', dfmt(o.to) || 'lopend', o.note]));
   $('#tabs').onclick = e => { const b = e.target.closest('button'); if (!b) return; showView(b.dataset.v); };
@@ -344,10 +344,66 @@ function renderOrgs() {
       <td class="num mono">${m2f(x.com)}</td><td class="num mono">${m2f(x.avg + x.com)}</td><td class="num mono">${x.heat ? eur(x.heat) : '–'}</td></tr>`).join('') +
     `</tbody><tfoot><tr><th>Leegstand</th><th></th><th></th><th class="num mono">${m2f(vacant)}</th><th class="mono" style="font-size:12px">${privTot ? (vacant / privTot * 100).toFixed(2) : 0}%</th><th></th><th></th><th></th></tr></tfoot>`;
 }
+// ---------- bezetting per periode (tijdlijn + tabel)
+function setPeriod(a, b) {
+  if (!a || !b || a > b) return; per = { from: a, to: b };
+  for (const [f, t] of [['#pFrom', '#pTo'], ['#bFrom', '#bTo']]) { $(f).value = a; $(t).value = b; }
+  renderOrgs(); renderOcc();
+}
+function bindOcc() {
+  if (bindOcc.done) return; bindOcc.done = true;
+  $('#bFrom').onchange = $('#bTo').onchange = () => setPeriod($('#bFrom').value, $('#bTo').value);
+  $('#bIsta').onclick = () => { const I = istaPeriod(); setPeriod(I.from, I.to); };
+  $('#bYear').onclick = () => { const y = peil.slice(0, 4); setPeriod(y + '-01-01', y + '-12-31'); };
+  ['#bOrg', '#bFloor'].forEach(x => $(x).oninput = renderOcc);
+  $('#bExp').onclick = () => { const rows = occRows(); exportCsv('Lakenhuis_bezetting_' + per.from + '_' + per.to + '.csv', ['ruimtecode', 'ruimte', 'verdieping', 'organisatie', 'van', 'tot', 'dagen_in_periode', 'm2', 'm2_dagen', 'gemiddelde_m2_periode'],
+    rows.map(x => [x.r.code, x.r.name, floorLabel(x.r.floor), x.o.org, dfmt(x.o.from) || 'onbekend', dfmt(x.o.to) || 'lopend', x.days, x.m2 ?? '', (x.m2 * x.days || 0).toFixed(1), x.m2 != null ? (x.m2 * x.days / x.P).toFixed(2) : ''])); };
+}
+function occRows() {
+  const A = per.from, B = per.to, P = dnum(B) - dnum(A) + 1, fo = $('#bOrg').value, ff = $('#bFloor').value, out = [];
+  for (const o of OCC) {
+    const r = roomOf(o.room); if (!r) continue;
+    if (fo && o.org !== fo) continue; if (ff && r.floor !== ff) continue;
+    const s0 = Math.max(dnum(A), o.from ? dnum(o.from) : -1e9), e0 = Math.min(dnum(B), o.to ? dnum(o.to) : 1e9);
+    if (e0 < s0) continue;
+    out.push({ o, r, s0, e0, days: e0 - s0 + 1, P, m2: m2(r) });
+  }
+  return out.sort((a, b) => GEO.floors.findIndex(f => f.id === a.r.floor) - GEO.floors.findIndex(f => f.id === b.r.floor) || a.r.code.localeCompare(b.r.code) || a.s0 - b.s0);
+}
+function renderOcc() {
+  if (!per) return; bindOcc();
+  const cur = [$('#bOrg').value, $('#bFloor').value];
+  $('#bOrg').innerHTML = '<option value="">Alle organisaties</option>' + ORGS.map(o => `<option>${esc(o.name)}</option>`).join(''); $('#bOrg').value = cur[0];
+  $('#bFloor').innerHTML = '<option value="">Alle verdiepingen</option>' + GEO.floors.map(f => `<option value="${f.id}">${esc(f.label)}</option>`).join(''); $('#bFloor').value = cur[1];
+  $('#bFrom').value = per.from; $('#bTo').value = per.to;
+  const rows = occRows(), A = dnum(per.from), P = dnum(per.to) - A + 1;
+  // summary per organisation
+  const sum = {}; rows.forEach(x => { const k = x.o.org; sum[k] = sum[k] || { days: 0, m2d: 0, rooms: new Set() }; sum[k].m2d += (x.m2 || 0) * x.days; sum[k].rooms.add(x.r.code); });
+  $('#occCards').innerHTML = `<div class="card"><span class="k">Periode</span><span class="v" style="font-size:20px">${dfmt(per.from)} – ${dfmt(per.to)}</span><span class="k">${P} dagen · ${rows.length} bezettingen</span></div>` +
+    Object.entries(sum).sort((a, b) => b[1].m2d - a[1].m2d).map(([k, v]) => `<div class="card"><span class="k"><span class="swatch" style="background:${orgColor(k) || '#ddd'}"></span>${esc(k)}</span><span class="v">${m2f(v.m2d / P)}</span><span class="k">gem. m² in periode · ${v.rooms.size} ruimte(n)</span></div>`).join('');
+  // timeline
+  const months = []; { let d = new Date(per.from + 'T00:00:00Z'); d.setUTCDate(1); while (d.toISOString().slice(0, 10) <= per.to) { const iso = d.toISOString().slice(0, 10); const x = Math.max(0, (dnum(iso) - A) / P * 100); months.push(`<span style="left:${x}%">${['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'][d.getUTCMonth()]}${d.getUTCMonth() === 0 ? ' ' + d.getUTCFullYear() : ''}</span>`); d.setUTCMonth(d.getUTCMonth() + 1); } }
+  const byRoom = {}; rows.forEach(x => (byRoom[x.r.code] = byRoom[x.r.code] || []).push(x));
+  const pp = dnum(peil) >= A && dnum(peil) <= A + P - 1 ? `<i class="peilline" style="left:${(dnum(peil) - A + 0.5) / P * 100}%" title="Peildatum ${dfmt(peil)}"></i>` : '';
+  $('#occTimeline').innerHTML = rows.length ? `<div class="tl-head"><div class="tl-l">Ruimte</div><div class="tl-r">${months.join('')}${pp}</div></div>` + Object.entries(byRoom).map(([code, xs]) => {
+    const r = roomOf(code);
+    return `<div class="tl-row" data-code="${esc(code)}"><div class="tl-l"><span class="mono">${esc(short(code))}</span> <span class="empty">${esc(r.name)}</span></div><div class="tl-r">${pp}` + xs.map(x => {
+      const l = (x.s0 - A) / P * 100, w = x.days / P * 100;
+      return `<b class="bar" style="left:${l}%;width:${w}%;background:${orgColor(x.o.org) || '#ddd'}" title="${esc(x.o.org)}: ${dfmt(x.o.from) || 'onbekend'} – ${dfmt(x.o.to) || 'lopend'} (${x.days} d in periode)">${w > 12 ? esc(x.o.org) : ''}</b>`;
+    }).join('') + '</div></div>';
+  }).join('') : '<p class="empty">Geen bezetting in deze periode.</p>';
+  $('#occTimeline').onclick = e => { const row = e.target.closest('.tl-row'); if (row) select(row.dataset.code); };
+  // table
+  $('#tOcc').innerHTML = `<thead><tr><th>Code</th><th>Ruimte</th><th>Verdieping</th><th>Organisatie</th><th>Van</th><th>Tot</th><th class="num">Dagen in periode</th><th class="num">m²</th><th class="num">Gem. m² periode</th></tr></thead><tbody>` +
+    rows.map(x => `<tr class="click" data-code="${esc(x.r.code)}"><td class="mono">${esc(x.r.code)}</td><td class="wrap">${esc(x.r.name)}</td><td>${esc(floorLabel(x.r.floor))}</td>
+      <td><span class="swatch" style="background:${orgColor(x.o.org) || '#ddd'}"></span>${esc(x.o.org)}</td><td class="mono">${dfmt(x.o.from) || '<span class="empty">onbekend</span>'}</td><td class="mono">${dfmt(x.o.to) || '<span class="empty">lopend</span>'}</td>
+      <td class="num mono">${x.days}</td><td class="num mono">${x.m2 != null ? m2f(x.m2) : '–'}</td><td class="num mono">${x.m2 != null ? m2f(x.m2 * x.days / P) : '–'}</td></tr>`).join('') + '</tbody>';
+  $('#tOcc').onclick = e => { const tr = e.target.closest('tr.click'); if (tr) select(tr.dataset.code); };
+}
 let raf = 0;
 function renderAll(keepPanel) {
   cancelAnimationFrame(raf);
-  raf = requestAnimationFrame(() => { renderPlan(); if (!keepPanel || !document.activeElement?.closest('#panel')) renderPanel(); renderRooms(); renderDoors(); renderIsta(); renderOrgs(); });
+  raf = requestAnimationFrame(() => { renderPlan(); if (!keepPanel || !document.activeElement?.closest('#panel')) renderPanel(); renderRooms(); renderDoors(); renderIsta(); renderOrgs(); renderOcc(); });
 }
 boot().catch(e => { if (e.message === 'no lists') return; console.error(e); setStatus('ro', 'Laden mislukt'); $('#notice').hidden = false; $('#notice').textContent = 'Het plan kon niet geladen worden: ' + (e.message || e) + '. Herlaad de pagina of meld je opnieuw aan.'; });
 })();

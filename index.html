@@ -139,6 +139,16 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 .orgnew input, .orgnew select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--r); background: var(--paper); color: var(--ink) }
 .orgnew input[type=color], input.ocol { padding: 0; width: 30px; height: 24px; border: 1px solid var(--line); border-radius: 4px; vertical-align: middle; cursor: pointer; background: none }
 #noMsg.saved { color: var(--ok, #1b7f3b) } #noMsg.err { color: var(--bad) }
+.timeline { margin: 12px 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--sheet); padding: 6px 10px; overflow-x: auto }
+.tl-head, .tl-row { display: grid; grid-template-columns: 220px 1fr; align-items: center; min-width: 640px }
+.tl-head { font-size: 11px; color: var(--muted); height: 22px; border-bottom: 1px solid var(--line) }
+.tl-row { height: 26px; border-bottom: 1px solid var(--line); cursor: pointer; font-size: 12px }
+.tl-row:hover { background: var(--paper) }
+.tl-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 8px }
+.tl-r { position: relative; height: 100% }
+.tl-head .tl-r span { position: absolute; top: 4px; transform: translateX(2px); border-left: 1px solid var(--line); padding-left: 3px; white-space: nowrap }
+.tl-row .bar { position: absolute; top: 5px; height: 16px; border-radius: 3px; font-weight: 500; font-size: 11px; color: #1d2328; padding: 0 4px; overflow: hidden; white-space: nowrap; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15) }
+.peilline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--accent); z-index: 1 }
 </style>
 </head>
 <body>
@@ -155,6 +165,7 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
     <button role="tab" data-v="doors" aria-selected="false">Deuren</button>
     <button role="tab" data-v="ista" aria-selected="false">Ista-meters</button>
     <button role="tab" data-v="orgs" aria-selected="false">Organisaties</button>
+    <button role="tab" data-v="occ" aria-selected="false">Bezetting</button>
   </nav>
   <label class="peil" title="Toon wie waar zat op deze datum">Peildatum <input type="date" id="peil"></label>
   <div class="status"><span class="dot" id="dot"></span><span id="statusText">Laden…</span><span id="who" style="margin-left:8px"></span><button class="btn" id="logout" hidden style="padding:2px 8px;font-size:12px">Afmelden</button></div>
@@ -202,6 +213,17 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
   <div class="tscroll"><table id="tIsta"></table></div>
 </section>
 
+<section class="view" id="v-occ" hidden>
+  <div class="tablebar"><h2>Bezetting</h2>
+    <label>Van <input type="date" id="bFrom"></label><label>Tot <input type="date" id="bTo"></label>
+    <button class="btn" id="bIsta">Ista-periode</button><button class="btn" id="bYear">Kalenderjaar</button>
+    <select id="bOrg" aria-label="Organisatie"></select><select id="bFloor" aria-label="Verdieping"></select>
+    <button class="btn" id="bExp">Exporteer (CSV)</button></div>
+  <div class="cards" id="occCards"></div>
+  <div class="timeline" id="occTimeline"></div>
+  <div class="tscroll"><table id="tOcc"></table></div>
+</section>
+
 <section class="view" id="v-orgs" hidden>
   <div class="tablebar"><h2>Organisaties</h2>
     <label>Van <input type="date" id="pFrom"></label><label>Tot <input type="date" id="pTo"></label>
@@ -216,8 +238,8 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=6"></script>
-<script src="graph.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="config.js?v=7"></script>
+<script src="graph.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
