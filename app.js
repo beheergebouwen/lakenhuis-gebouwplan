@@ -190,6 +190,14 @@ function renderPanel() {
       <div class="chips" style="margin-top:6px"><span class="chip ${USEC[r.use] || ''}">${esc(r.use)}</span><span class="chip">${esc(floorLabel(r.floor))}</span>
       ${orgOf(r) ? `<span class="chip" style="background:${orgColor(orgOf(r)) || 'var(--paper)'};color:#1d2328">${esc(orgOf(r))}</span>` : ''}
       ${r.ok ? '<span class="chip okc">Gecontroleerd</span>' : (r.src === 'Te meten' && r.m2meas == null ? '<span class="chip warn">Te meten</span>' : '')}</div></div>
+    <div class="occbox"><div class="sub">Bezetting (historiek)</div>
+      ${occOf(r.code).length ? `<div class="occlist">${occOf(r.code).map(o => `<div class="occitem${isOpen(o, peil) ? ' now' : ''}" data-id="${esc(o._id)}">
+        <div class="occorg"><span class="swatch" style="background:${orgColor(o.org)}"></span>${esc(o.org)}${isOpen(o, peil) ? ' <span class="chip okc" style="font-size:11px">nu</span>' : ''}</div>
+        <div class="two"><label>Van<input type="date" data-k="from" value="${esc(o.from)}" ${dis}></label><label>Tot<input type="date" data-k="to" value="${esc(o.to)}" ${dis}></label></div></div>`).join('')}</div>
+        <p class="empty" style="margin:4px 0 0;font-size:12px">Leeg 'Van' = datum onbekend · leeg 'Tot' = loopt nog.</p>` : '<p class="empty" style="margin:0;font-size:13px">Nog geen bezetting geregistreerd.</p>'}
+      ${canWrite ? `<form class="edit" id="fOcc" style="margin-top:8px"><div class="two"><div class="row"><label for="oOrg">Nieuwe bezetting / vertrek</label><select id="oOrg"><option value="">Vertrek (ruimte wordt leeg)</option>${ORGS.map(o => `<option>${esc(o.name)}</option>`).join('')}</select></div>
+        <div class="row"><label for="oDate">Vanaf datum</label><input type="date" id="oDate" value="${peil}" required></div></div>
+        <div class="btns"><button class="btn primary" type="submit">Registreren</button><span id="oMsg"></span></div></form>` : ''}</div>
     <form class="edit" id="fRoom">
       <div class="row"><label for="fName">Ruimte</label><input id="fName" value="${esc(r.name)}" ${dis}></div>
       <div class="two"><div class="row"><label for="fUse">Gebruik</label><select id="fUse" ${dis}>${USES.map(u => `<option ${u === r.use ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
@@ -201,22 +209,15 @@ function renderPanel() {
       <div class="row"><label for="fNote">Opmerking</label><textarea id="fNote" ${dis}>${esc(r.note)}</textarea></div>
       <div class="btns">${canWrite ? '<button class="btn primary" type="submit">Opslaan</button>' : '<span class="empty" style="font-size:12px">Alleen lezen</span>'}<span id="fMsg"></span></div>
     </form>
-    <div><div class="sub">Bezetting (historiek)</div>
-      ${occOf(r.code).length ? `<table class="occ"><thead><tr><th>Organisatie</th><th>Van</th><th>Tot</th></tr></thead><tbody>${occOf(r.code).map(o => `<tr data-id="${esc(o._id)}" class="${isOpen(o, peil) ? 'now' : ''}"><td><span class="swatch" style="background:${orgColor(o.org)}"></span>${esc(o.org)}</td>
-        <td><input type="date" data-k="from" value="${esc(o.from)}" ${dis} aria-label="Van"></td><td><input type="date" data-k="to" value="${esc(o.to)}" ${dis} aria-label="Tot"></td></tr>`).join('')}</tbody></table>
-        <p class="empty" style="margin:4px 0 0;font-size:12px">Leeg 'Van' = datum onbekend · leeg 'Tot' = loopt nog.</p>` : '<p class="empty" style="margin:0;font-size:13px">Nog geen bezetting geregistreerd.</p>'}
-      ${canWrite ? `<form class="edit" id="fOcc" style="margin-top:8px"><div class="two"><div class="row"><label for="oOrg">Wijziging</label><select id="oOrg"><option value="">Vertrek (ruimte wordt leeg)</option>${ORGS.map(o => `<option>${esc(o.name)}</option>`).join('')}</select></div>
-        <div class="row"><label for="oDate">Datum</label><input type="date" id="oDate" value="${peil}" required></div></div>
-        <div class="btns"><button class="btn" type="submit">Registreren</button><span id="oMsg"></span></div></form>` : ''}</div>
     <div><div class="sub">Ista-meters (${ms.length})</div>
       ${ms.length ? `<ul class="mini">${ms.map(m => `<li><span class="mono">${esc(m.nr)}</span><span>${Number(m.units).toLocaleString('nl-BE')} eenh.</span><span class="num">${eur(meterCost(m))}</span></li>`).join('')}
         <li><b>Verwarming ${esc(S.settings.period)}</b><b class="num">${eur(heat)}</b></li></ul>` : '<p class="empty" style="margin:0;font-size:13px">Nog geen meter gekoppeld. Koppel meters in de tab Ista-meters.</p>'}</div>
     <div><div class="sub">Deuren (${doors.length})</div>${doors.length ? `<ul class="mini">${doors.map(d => `<li><span class="mono">${esc(d.code)}</span><span>${esc(d.fr === sel ? '→ ' + d.to : '← ' + d.fr)}</span><span>${d.checked ? '✓' : ''}</span></li>`).join('')}</ul>` : '<p class="empty" style="margin:0;font-size:13px">Geen deuren gekoppeld.</p>'}</div>
     ${r.oldCode ? `<p class="empty" style="margin:0;font-size:12px">Oude code: ${esc(r.oldCode)}${r.updatedAt ? ' · gewijzigd ' + new Date(r.updatedAt).toLocaleString('nl-BE') : ''}</p>` : ''}`;
   const P2 = $('#panel');
-  const occTable = P2.querySelector('table.occ');
+  const occTable = P2.querySelector('.occlist');
   if (occTable) occTable.onchange = async e => {
-    const inp = e.target.closest('input[data-k]'); if (!inp) return; const o = OCC.find(x => String(x._id) === inp.closest('tr').dataset.id);
+    const inp = e.target.closest('input[data-k]'); if (!inp) return; const o = OCC.find(x => String(x._id) === inp.closest('.occitem').dataset.id);
     const next = { ...o, [inp.dataset.k]: inp.value };
     if (next.from && next.to && next.to < next.from) { inp.style.outline = '2px solid var(--bad)'; setStatus('ro', "'Tot' ligt vóór 'Van'"); return; }
     try { await save('occ', o._id, next); Object.assign(o, next); syncRoomOrg(r); renderAll(true); } catch (er) { inp.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); }

@@ -149,6 +149,14 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 .tl-head .tl-r span { position: absolute; top: 4px; transform: translateX(2px); border-left: 1px solid var(--line); padding-left: 3px; white-space: nowrap }
 .tl-row .bar { position: absolute; top: 5px; height: 16px; border-radius: 3px; font-weight: 500; font-size: 11px; color: #1d2328; padding: 0 4px; overflow: hidden; white-space: nowrap; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15) }
 .peilline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--accent); z-index: 1 }
+.occbox { border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; background: var(--paper) }
+.occlist { display: flex; flex-direction: column; gap: 6px }
+.occitem { border: 1px solid var(--line); border-radius: var(--r); padding: 6px 8px; background: var(--sheet) }
+.occitem.now { border-color: var(--accent) }
+.occorg { font-weight: 600; font-size: 13px; margin-bottom: 4px }
+.occitem .two { display: grid; grid-template-columns: 1fr 1fr; gap: 6px }
+.occitem label { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); gap: 2px; min-width: 0 }
+.occitem input { font: inherit; font-size: 12px; padding: 3px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); width: 100%; min-width: 0; box-sizing: border-box }
 </style>
 </head>
 <body>
@@ -238,8 +246,8 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=7"></script>
-<script src="graph.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="config.js?v=8"></script>
+<script src="graph.js?v=8"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>
