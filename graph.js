@@ -75,6 +75,7 @@
       if (obj._id) return g(`/sites/${siteId}/lists/${id}/items/${obj._id}/fields`, { method: 'PATCH', body: JSON.stringify(toSp(kind, obj)) });
       const r = await g(`/sites/${siteId}/lists/${id}/items`, { method: 'POST', body: JSON.stringify({ fields: toSp(kind, obj) }) }); obj._id = r.id; return r;
     },
+    async remove(kind, id) { const lid = await this.listId(kind); return g(`/sites/${siteId}/lists/${lid}/items/${id}`, { method: 'DELETE' }); },
     async image(file) { return URL.createObjectURL(await g(`/sites/${siteId}/drive/root:/${C.planFolder}/${file}:/content`)); },
     // ---- one-time setup (setup/index.html)
     async createList(kind) {

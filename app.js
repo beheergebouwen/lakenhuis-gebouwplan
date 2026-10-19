@@ -192,7 +192,7 @@ function renderPanel() {
       ${r.ok ? '<span class="chip okc">Gecontroleerd</span>' : (r.src === 'Te meten' && r.m2meas == null ? '<span class="chip warn">Te meten</span>' : '')}</div></div>
     <div class="occbox"><div class="sub">Bezetting (historiek)</div>
       ${occOf(r.code).length ? `<div class="occlist">${occOf(r.code).map(o => `<div class="occitem${isOpen(o, peil) ? ' now' : ''}" data-id="${esc(o._id)}">
-        <div class="occorg"><span class="swatch" style="background:${orgColor(o.org)}"></span>${esc(o.org)}${isOpen(o, peil) ? ' <span class="chip okc" style="font-size:11px">nu</span>' : ''}</div>
+        <div class="occorg"><span class="swatch" style="background:${orgColor(o.org)}"></span>${esc(o.org)}${isOpen(o, peil) ? ' <span class="chip okc" style="font-size:11px">nu</span>' : ''}${canWrite ? '<button type="button" class="occdel" title="Deze bezetting verwijderen" aria-label="Verwijderen">✕</button><span class="occconf" hidden>Verwijderen? <button type="button" class="btn occyes">Ja</button> <button type="button" class="btn occno">Nee</button></span>' : ''}</div>
         <div class="two"><label>Van<input type="date" data-k="from" value="${esc(o.from)}" ${dis}></label><label>Tot<input type="date" data-k="to" value="${esc(o.to)}" ${dis}></label></div></div>`).join('')}</div>
         <p class="empty" style="margin:4px 0 0;font-size:12px">Leeg 'Van' = datum onbekend · leeg 'Tot' = loopt nog.</p>` : '<p class="empty" style="margin:0;font-size:13px">Nog geen bezetting geregistreerd.</p>'}
       ${canWrite ? `<form class="edit" id="fOcc" style="margin-top:8px"><div class="two"><div class="row"><label for="oOrg">Nieuwe bezetting / vertrek</label><select id="oOrg"><option value="">Vertrek (ruimte wordt leeg)</option>${ORGS.map(o => `<option>${esc(o.name)}</option>`).join('')}</select></div>
@@ -216,6 +216,17 @@ function renderPanel() {
     ${r.oldCode ? `<p class="empty" style="margin:0;font-size:12px">Oude code: ${esc(r.oldCode)}${r.updatedAt ? ' · gewijzigd ' + new Date(r.updatedAt).toLocaleString('nl-BE') : ''}</p>` : ''}`;
   const P2 = $('#panel');
   const occTable = P2.querySelector('.occlist');
+  if (occTable) occTable.onclick = async e => {
+    const item = e.target.closest('.occitem'); if (!item) return;
+    const conf = item.querySelector('.occconf'), del = item.querySelector('.occdel');
+    if (e.target.closest('.occdel')) { conf.hidden = false; del.hidden = true; return; }
+    if (e.target.closest('.occno')) { conf.hidden = true; del.hidden = false; return; }
+    if (e.target.closest('.occyes')) {
+      const o = OCC.find(x => String(x._id) === item.dataset.id); if (!o) return;
+      try { await LK.remove('occ', o._id); OCC = OCC.filter(x => x !== o); await syncRoomOrg(r); setStatus('live', 'Bezetting verwijderd · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); renderAll(true); renderPanel(); }
+      catch (er) { setStatus('ro', 'Niet verwijderd: ' + (er.status === 403 ? 'geen bewerkrechten' : er.message)); }
+    }
+  };
   if (occTable) occTable.onchange = async e => {
     const inp = e.target.closest('input[data-k]'); if (!inp) return; const o = OCC.find(x => String(x._id) === inp.closest('.occitem').dataset.id);
     const next = { ...o, [inp.dataset.k]: inp.value };
