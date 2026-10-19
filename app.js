@@ -195,7 +195,7 @@ function renderPanel() {
         <div class="occorg"><span class="swatch" style="background:${orgColor(o.org)}"></span>${esc(o.org)}${isOpen(o, peil) ? ' <span class="chip okc" style="font-size:11px">nu</span>' : ''}${canWrite ? '<button type="button" class="occdel" title="Deze bezetting verwijderen" aria-label="Verwijderen">✕</button><span class="occconf" hidden>Verwijderen? <button type="button" class="btn occyes">Ja</button> <button type="button" class="btn occno">Nee</button></span>' : ''}</div>
         <div class="two"><label>Van<input type="date" data-k="from" value="${esc(o.from)}" ${dis}></label><label>Tot<input type="date" data-k="to" value="${esc(o.to)}" ${dis}></label></div></div>`).join('')}</div>
         <p class="empty" style="margin:4px 0 0;font-size:12px">Leeg 'Van' = datum onbekend · leeg 'Tot' = loopt nog.</p>` : '<p class="empty" style="margin:0;font-size:13px">Nog geen bezetting geregistreerd.</p>'}
-      ${canWrite ? `<form class="edit" id="fOcc" style="margin-top:8px"><div class="two"><div class="row"><label for="oOrg">Nieuwe bezetting / vertrek</label><select id="oOrg"><option value="">Vertrek (ruimte wordt leeg)</option>${ORGS.map(o => `<option>${esc(o.name)}</option>`).join('')}</select></div>
+      ${canWrite ? `<form class="edit" id="fOcc" style="margin-top:8px"><div class="two"><div class="row"><label for="oOrg">Nieuwe bezetting / vertrek</label><select id="oOrg">${[...ORGS].sort((a, b) => (b.name === 'De Overmolen') - (a.name === 'De Overmolen')).map(o => `<option ${o.name === 'De Overmolen' ? 'value="De Overmolen"' : ''}>${o.name === 'De Overmolen' ? 'Vertrek → terug naar De Overmolen' : esc(o.name)}</option>`).join('')}</select></div>
         <div class="row"><label for="oDate">Vanaf datum</label><input type="date" id="oDate" value="${peil}" required></div></div>
         <div class="btns"><button class="btn primary" type="submit">Registreren</button><span id="oMsg"></span></div></form>` : ''}</div>
     <form class="edit" id="fRoom">
@@ -234,7 +234,7 @@ function renderPanel() {
     try { await save('occ', o._id, next); Object.assign(o, next); syncRoomOrg(r); renderAll(true); } catch (er) { inp.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); }
   };
   if ($('#fOcc')) $('#fOcc').onsubmit = async e => {
-    e.preventDefault(); const msg = $('#oMsg'); const D = $('#oDate').value, org = $('#oOrg').value; if (!D) return;
+    e.preventDefault(); const msg = $('#oMsg'); const D = $('#oDate').value, org = $('#oOrg').value || 'De Overmolen'; if (!D) return;
     const open = occOf(r.code).filter(o => isOpen(o, D));
     if (!org && !open.length) { msg.className = 'err'; msg.textContent = 'Op die datum zit er niemand.'; return; }
     if (org && open.some(o => o.org === org)) { msg.className = 'err'; msg.textContent = org + ' zit hier al op die datum.'; return; }
