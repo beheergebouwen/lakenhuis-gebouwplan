@@ -15,6 +15,7 @@
     doors:   { code: 'Title', floor: 'Verdieping', fr: 'Van', to: 'Naar', arch: 'CodeArchitect', type: 'DeurType', size: 'Maat', lock: 'SlotBadge', key: 'SleutelNr', checked: 'Gecontroleerd', note: 'Opmerking', oldCode: 'OudeCode' },
     meters:  { nr: 'Title', unit: 'IstaUnit', istaCode: 'IstaCode', istaRoom: 'IstaRuimte', old: 'OudeStand', new: 'NieuweStand', units: 'Verbruik', room: 'RuimteCode', note: 'Opmerking' },
     orgs:    { name: 'Title', color: 'Kleur', type: 'Soort' },
+    costs:   { desc: 'Title', cat: 'Categorie', from: 'Van', to: 'Tot', amount: 'Bedrag', key: 'Sleutel', org: 'Organisatie', supplier: 'Leverancier', invoice: 'Factuurnr', meter: 'Meter', note: 'Opmerking' },
     occ:     { room: 'Title', org: 'Organisatie', from: 'Van', to: 'Tot', note: 'Opmerking' },
     settings:{ key: 'Title', period: 'Periode', heatCost: 'Verwarmingskost', totalUnits: 'EenhedenTotaal', rentTotal: 'HuurVerdelers', meterCount: 'AantalMeters' }
   };
@@ -43,8 +44,8 @@
   }
   const DATES = { Van: 1, Tot: 1 };
   const ymd = v => v ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels' }).format(new Date(v)) : '';
-  const toApp = (kind, f, id) => { const o = { _id: id }; for (const [a, s] of Object.entries(MAP[kind])) o[a] = kind === 'occ' && DATES[s] ? ymd(f[s]) : (f[s] ?? (typeof f[s] === 'boolean' ? false : '')); return o; };
-  const toSp = (kind, o) => { const f = {}; for (const [a, s] of Object.entries(MAP[kind])) if (a in o) f[s] = kind === 'occ' && DATES[s] ? (o[a] ? o[a] + 'T12:00:00Z' : null) : (o[a] === '' && /M2|Verbruik|Stand|kost|Eenheden|Huur|Aantal/.test(s) ? null : o[a]); return f; };
+  const toApp = (kind, f, id) => { const o = { _id: id }; for (const [a, s] of Object.entries(MAP[kind])) o[a] = (kind === 'occ' || kind === 'costs') && DATES[s] ? ymd(f[s]) : (f[s] ?? (typeof f[s] === 'boolean' ? false : '')); return o; };
+  const toSp = (kind, o) => { const f = {}; for (const [a, s] of Object.entries(MAP[kind])) if (a in o) f[s] = (kind === 'occ' || kind === 'costs') && DATES[s] ? (o[a] ? o[a] + 'T12:00:00Z' : null) : (o[a] === '' && /M2|Verbruik|Stand|kost|Eenheden|Huur|Aantal|Bedrag/.test(s) ? null : o[a]); return f; };
 
   const API = {
     async login() {

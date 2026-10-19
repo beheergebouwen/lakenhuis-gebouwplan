@@ -16,7 +16,7 @@ const orgColor = o => { const x = ORGS.find(g => g.name === o); return x ? x.col
 
 let GEO, canWrite = true; const IMG = {};
 // ---------- bezetting (wie zat waar, van wanneer tot wanneer)
-let OCC = [];                                    // {_id, room, org, from, to, note}  (datums YYYY-MM-DD, leeg = onbekend / lopend)
+let OCC = [], COSTS = [];                                    // {_id, room, org, from, to, note}  (datums YYYY-MM-DD, leeg = onbekend / lopend)
 const ymd = d => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels' }).format(d);
 const dnum = s => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 864e5;
 const addDays = (s, n) => new Date((dnum(s) + n) * 864e5).toISOString().slice(0, 10);
@@ -55,7 +55,8 @@ async function boot() {
   setInterval(() => { if (!document.hidden && !document.activeElement?.closest('form,select,input,textarea')) reload().then(() => renderAll(true)); }, 60000);
 }
 async function reload(first) {
-  const [rooms, doors, meters, orgs, settings, occ] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ'].map(k => LK.load(k).catch(() => null)));
+  const [rooms, doors, meters, orgs, settings, occ, costs] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ', 'costs'].map(k => LK.load(k).catch(() => null)));
+  COSTS = costs || [];
   OCC = (occ || []).filter(o => o.room && o.org);
   if (!rooms) { setStatus('ro', 'Lijsten niet gevonden'); const n = $('#notice'); n.hidden = false; n.textContent = 'De SharePoint-lijsten bestaan nog niet. Laat IT eenmalig setup/ uitvoeren (zie handleiding).'; throw new Error('no lists'); }
   S.rooms = Object.fromEntries(rooms.map(r => [r.code, r])); S.doors = Object.fromEntries(doors.map(d => [d.code, d]));
@@ -359,8 +360,8 @@ function renderOrgs() {
 // ---------- bezetting per periode (tijdlijn + tabel)
 function setPeriod(a, b) {
   if (!a || !b || a > b) return; per = { from: a, to: b };
-  for (const [f, t] of [['#pFrom', '#pTo'], ['#bFrom', '#bTo']]) { $(f).value = a; $(t).value = b; }
-  renderOrgs(); renderOcc();
+  for (const [f, t] of [['#pFrom', '#pTo'], ['#bFrom', '#bTo'], ['#aFrom', '#aTo']]) { if ($(f)) { $(f).value = a; $(t).value = b; } }
+  renderOrgs(); renderOcc(); renderAfr();
 }
 function bindOcc() {
   if (bindOcc.done) return; bindOcc.done = true;
@@ -412,10 +413,92 @@ function renderOcc() {
       <td class="num mono">${x.days}</td><td class="num mono">${x.m2 != null ? m2f(x.m2) : '–'}</td><td class="num mono">${x.m2 != null ? m2f(x.m2 * x.days / P) : '–'}</td></tr>`).join('') + '</tbody>';
   $('#tOcc').onclick = e => { const tr = e.target.closest('tr.click'); if (tr) select(tr.dataset.code); };
 }
+// ---------- afrekening: kostenposten + verdeelsleutels
+const CATS = ['Water (algemene meter)', 'Elektriciteit algemeen', 'Elektriciteit eigen meter', 'Gas / verwarming', 'Schoonmaak', 'Herstelling / onderhoud', 'Lift', 'Verzekering', 'Afval', 'Andere'];
+const KEYS = ['m² × dagen bezetting', 'Ista-verbruik', 'Gelijke delen (huurders)', 'Rechtstreeks aan één organisatie'];
+const eur2 = n => (Math.round(n * 100) / 100).toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' });
+function weights(key, A, B, org) {
+  const P = dnum(B) - dnum(A) + 1, w = {};
+  if (key === KEYS[3]) { if (org) w[org] = 1; return w; }
+  if (key === KEYS[1]) {
+    for (const m of Object.values(S.meters)) { const r = roomOf(m.room); if (!r) continue; for (const [o, d] of Object.entries(orgDays(r, A, B))) w[o] = (w[o] || 0) + (Number(m.units) || 0) * d / P; }
+    if (Object.values(w).reduce((a, b) => a + b, 0) > 0) return w;
+  }
+  if (key === KEYS[2]) {
+    const huur = new Set(ORGS.filter(o => o.type !== 'Eigenaar').map(o => o.name));
+    for (const r of Object.values(S.rooms)) for (const [o, d] of Object.entries(orgDays(r, A, B))) if (huur.has(o)) w[o] = Math.max(w[o] || 0, d / P);
+    return w;
+  }
+  // m² × dagen (verhuurbare ruimten); niet-bezette m²-dagen gaan naar De Overmolen
+  let tot = 0;
+  for (const r of Object.values(S.rooms)) { if (r.use !== 'Verhuurbaar') continue; const a = m2(r) || 0; tot += a * P; for (const [o, d] of Object.entries(orgDays(r, A, B))) w[o] = (w[o] || 0) + a * d; }
+  const used = Object.values(w).reduce((a, b) => a + b, 0); if (tot > used) w['De Overmolen'] = (w['De Overmolen'] || 0) + (tot - used);
+  return w;
+}
+function split(c) {
+  const A = c.from || per.from, B = c.to || per.to, w = weights(c.key || KEYS[0], A, B, c.org), T = Object.values(w).reduce((a, b) => a + b, 0), amt = Number(c.amount) || 0, out = {};
+  if (T > 0) for (const [o, v] of Object.entries(w)) out[o] = amt * v / T;
+  return out;
+}
+function costsInPeriod() { return COSTS.filter(c => (!c.to || c.to >= per.from) && (!c.from || c.from <= per.to)).sort((a, b) => (a.cat || '').localeCompare(b.cat || '') || (a.from || '').localeCompare(b.from || '')); }
+function bindAfr() {
+  if (bindAfr.done) return; bindAfr.done = true;
+  $('#aFrom').onchange = $('#aTo').onchange = () => setPeriod($('#aFrom').value, $('#aTo').value);
+  $('#aIsta').onclick = () => { const I = istaPeriod(); setPeriod(I.from, I.to); };
+  $('#aYear').onclick = () => { const y = peil.slice(0, 4); setPeriod(y + '-01-01', y + '-12-31'); };
+  $('#aPrint').onclick = () => { document.body.classList.add('print-afr'); window.print(); setTimeout(() => document.body.classList.remove('print-afr'), 500); };
+  $('#aExp').onclick = () => { const cs = costsInPeriod(), orgs = afrOrgs(cs);
+    exportCsv('Lakenhuis_afrekening_' + per.from + '_' + per.to + '.csv', ['categorie', 'omschrijving', 'leverancier', 'factuur', 'meter', 'van', 'tot', 'bedrag', 'sleutel', ...orgs],
+      cs.map(c => { const sp = split(c); return [c.cat, c.desc, c.supplier, c.invoice, c.meter, dfmt(c.from), dfmt(c.to), (Number(c.amount) || 0).toFixed(2), c.key + (c.org ? ' (' + c.org + ')' : ''), ...orgs.map(o => (sp[o] || 0).toFixed(2))]; })); };
+}
+function afrOrgs(cs) { const set = new Set(); cs.forEach(c => Object.keys(split(c)).forEach(o => set.add(o))); return [...ORGS.map(o => o.name).filter(n => set.has(n)), ...[...set].filter(n => !ORGS.some(o => o.name === n))]; }
+function renderAfr() {
+  if (!per || !$('#v-afr')) return; bindAfr();
+  $('#aFrom').value = per.from; $('#aTo').value = per.to;
+  const dis = canWrite;
+  $('#afrNew').innerHTML = dis ? `<b>Nieuwe kostenpost</b>
+    <select id="cCat" aria-label="Categorie">${CATS.map(c => `<option>${c}</option>`).join('')}</select>
+    <input id="cDesc" placeholder="Omschrijving (bv. Sibelga factuur Q1)" style="flex:2 1 200px" aria-label="Omschrijving">
+    <input id="cAmt" placeholder="Bedrag €" inputmode="decimal" style="width:110px" aria-label="Bedrag">
+    <label>Van <input type="date" id="cFrom" value="${per.from}"></label><label>Tot <input type="date" id="cTo" value="${per.to}"></label>
+    <select id="cKey" aria-label="Verdeelsleutel">${KEYS.map(k => `<option>${k}</option>`).join('')}</select>
+    <select id="cOrg" aria-label="Organisatie" hidden>${ORGS.map(o => `<option>${esc(o.name)}</option>`).join('')}</select>
+    <input id="cSup" placeholder="Leverancier" style="width:140px" aria-label="Leverancier"><input id="cInv" placeholder="Factuurnr" style="width:110px" aria-label="Factuurnummer"><input id="cMeter" placeholder="Meter / EAN" style="width:120px" aria-label="Meter">
+    <button class="btn primary" id="cAdd">Toevoegen</button><span id="cMsg"></span>` : '';
+  if (dis) {
+    const sync = () => { $('#cOrg').hidden = $('#cKey').value !== KEYS[3]; };
+    $('#cCat').onchange = () => { const v = $('#cCat').value; $('#cKey').value = v === 'Gas / verwarming' ? KEYS[1] : v === 'Elektriciteit eigen meter' ? KEYS[3] : KEYS[0]; sync(); };
+    $('#cKey').onchange = sync;
+    $('#cAdd').onclick = async () => {
+      const msg = $('#cMsg'), amt = Number(String($('#cAmt').value).replace(/\s/g, '').replace(',', '.'));
+      if (!$('#cDesc').value.trim() || !isFinite(amt) || !$('#cAmt').value) { msg.className = 'err'; msg.textContent = 'Geef omschrijving en bedrag in.'; return; }
+      if ($('#cFrom').value > $('#cTo').value) { msg.className = 'err'; msg.textContent = "'Tot' ligt vóór 'Van'."; return; }
+      const c = { desc: $('#cDesc').value.trim(), cat: $('#cCat').value, amount: amt, from: $('#cFrom').value, to: $('#cTo').value, key: $('#cKey').value, org: $('#cKey').value === KEYS[3] ? $('#cOrg').value : '', supplier: $('#cSup').value.trim(), invoice: $('#cInv').value.trim(), meter: $('#cMeter').value.trim(), note: '' };
+      try { msg.className = ''; msg.textContent = 'Opslaan…'; await LK.save('costs', c); COSTS.push(c); renderAfr(); setStatus('live', 'Kostenpost opgeslagen · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); }
+      catch (e) { msg.className = 'err'; msg.textContent = 'Niet opgeslagen: ' + (e.status === 403 ? 'geen bewerkrechten.' : e.message); }
+    };
+  }
+  const cs = costsInPeriod(), orgs = afrOrgs(cs), tot = {}; let total = 0;
+  cs.forEach(c => { const sp = split(c); total += Number(c.amount) || 0; for (const [o, v] of Object.entries(sp)) tot[o] = (tot[o] || 0) + v; });
+  $('#afrCards').innerHTML = `<div class="card"><span class="k">Periode</span><span class="v" style="font-size:20px">${dfmt(per.from)} – ${dfmt(per.to)}</span><span class="k">${cs.length} kostenposten</span></div>
+    <div class="card"><span class="k">Totale kosten</span><span class="v">${eur2(total)}</span></div>` +
+    orgs.map(o => `<div class="card"><span class="k"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</span><span class="v">${eur2(tot[o] || 0)}</span><span class="k">${total ? ((tot[o] || 0) / total * 100).toFixed(1) : 0}% van totaal</span></div>`).join('');
+  $('#tAfr').innerHTML = cs.length ? `<thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Sleutel</th>${orgs.map(o => `<th class="num"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</th>`).join('')}<th></th></tr></thead><tbody>` +
+    cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td>${esc(c.cat)}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}</td>
+      <td class="mono" style="font-size:12px">${dfmt(c.from)}<br>${dfmt(c.to)}</td><td class="num mono">${eur2(Number(c.amount) || 0)}</td><td style="font-size:12px">${esc(c.key)}${c.org ? '<br><b>' + esc(c.org) + '</b>' : ''}</td>
+      ${orgs.map(o => `<td class="num mono">${sp[o] ? eur2(sp[o]) : '–'}</td>`).join('')}<td>${canWrite ? '<button class="occdel cdel" title="Verwijderen">✕</button>' : ''}</td></tr>`; }).join('') +
+    `</tbody><tfoot><tr><th colspan="3">Totaal</th><th class="num mono">${eur2(total)}</th><th></th>${orgs.map(o => `<th class="num mono">${eur2(tot[o] || 0)}</th>`).join('')}<th></th></tr></tfoot>` : '<tbody><tr><td class="empty">Nog geen kostenposten in deze periode. Voeg ze hierboven toe.</td></tr></tbody>';
+  $('#tAfr').onclick = async e => {
+    const b = e.target.closest('.cdel'); if (!b) return; const tr = b.closest('tr');
+    if (!tr.dataset.confirm) { tr.dataset.confirm = 1; b.textContent = 'Zeker?'; b.style.width = 'auto'; return; }
+    const c = COSTS.find(x => String(x._id) === tr.dataset.id); if (!c) return;
+    try { await LK.remove('costs', c._id); COSTS = COSTS.filter(x => x !== c); renderAfr(); } catch (er) { setStatus('ro', 'Niet verwijderd: ' + er.message); }
+  };
+}
 let raf = 0;
 function renderAll(keepPanel) {
   cancelAnimationFrame(raf);
-  raf = requestAnimationFrame(() => { renderPlan(); if (!keepPanel || !document.activeElement?.closest('#panel')) renderPanel(); renderRooms(); renderDoors(); renderIsta(); renderOrgs(); renderOcc(); });
+  raf = requestAnimationFrame(() => { renderPlan(); if (!keepPanel || !document.activeElement?.closest('#panel')) renderPanel(); renderRooms(); renderDoors(); renderIsta(); renderOrgs(); renderOcc(); renderAfr(); });
 }
 boot().catch(e => { if (e.message === 'no lists') return; console.error(e); setStatus('ro', 'Laden mislukt'); $('#notice').hidden = false; $('#notice').textContent = 'Het plan kon niet geladen worden: ' + (e.message || e) + '. Herlaad de pagina of meld je opnieuw aan.'; });
 })();
