@@ -60,7 +60,7 @@ async function reload(first) {
   if (!rooms) { setStatus('ro', 'Lijsten niet gevonden'); const n = $('#notice'); n.hidden = false; n.textContent = 'De SharePoint-lijsten bestaan nog niet. Laat IT eenmalig setup/ uitvoeren (zie handleiding).'; throw new Error('no lists'); }
   S.rooms = Object.fromEntries(rooms.map(r => [r.code, r])); S.doors = Object.fromEntries(doors.map(d => [d.code, d]));
   S.meters = Object.fromEntries(meters.map(m => [m.nr, m]));
-  ORGS = (orgs || []).filter(o => o.name).map(o => ({ name: o.name, color: o.color || '#e6e2d6', type: o.type }));
+  ORGS = (orgs || []).filter(o => o.name).map(o => ({ _id: o._id, name: o.name, color: o.color || '#e6e2d6', type: o.type || 'Huurder' })).sort((a, b) => a.name.localeCompare(b.name));
   S.settings = (settings || []).find(x => x.key === 'ista') || S.settings;
   for (const k of ['heatCost', 'totalUnits', 'rentTotal', 'meterCount']) S.settings[k] = Number(S.settings[k]) || 0;
   if (!per) per = istaPeriod();
@@ -114,6 +114,19 @@ function buildStatic() {
     Object.values(S.doors).sort((a, b) => a.code.localeCompare(b.code)).map(d => [d.code, floorLabel(d.floor), d.fr, d.to, d.type, d.size, d.lock, d.key, d.checked ? 'ja' : 'nee', d.note]));
   $('#expIsta').onclick = () => exportCsv('Lakenhuis_ista.csv', ['meternummer', 'ista_unit', 'ista_ruimte', 'verbruik_eenheden', 'ruimtecode', 'ruimte', 'organisatie', 'verwarming_eur', 'huur_meter_eur', 'totaal_eur'],
     Object.values(S.meters).map(m => { const r = roomOf(m.room) || {}; return [m.nr, m.unit, m.istaRoom, m.units, m.room, r.name || '', orgOf(r) || '', ((Number(m.units) || 0) * price()).toFixed(2), rent().toFixed(2), meterCost(m).toFixed(2)]; }));
+}
+function refreshOrgUI() {
+  const cur = $('#rOrg').value;
+  $('#rOrg').innerHTML = '<option value="">Alle organisaties</option><option value="-">Zonder organisatie</option>' + ORGS.map(o => `<option>${esc(o.name)}</option>`).join('');
+  $('#rOrg').value = cur;
+  $('#legend').innerHTML = USES.map(u => `<span><i style="border-color:var(${USEV[u]})"></i>${u}</span>`).join('') +
+    ORGS.map(o => `<span><i style="border-color:transparent;background:${o.color}"></i>${esc(o.name)}</span>`).join('');
+}
+async function saveOrg(o, msgEl) {
+  try { await LK.save('orgs', o); if (msgEl) { msgEl.className = 'saved'; msgEl.textContent = 'Opgeslagen'; }
+    const orgs = await LK.load('orgs'); ORGS = orgs.filter(x => x.name).map(x => ({ _id: x._id, name: x.name, color: x.color || '#e6e2d6', type: x.type || 'Huurder' })).sort((a, b) => a.name.localeCompare(b.name));
+    refreshOrgUI(); renderAll(true); }
+  catch (e) { if (msgEl) { msgEl.className = 'err'; msgEl.textContent = 'Niet opgeslagen: ' + (e.status === 403 ? 'geen bewerkrechten.' : e.message); } }
 }
 function showView(v) {
   document.querySelectorAll('#tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.v === v));
@@ -291,7 +304,11 @@ function renderIsta() {
     try { await save('meters', nr, body); S.meters[nr] = body; renderAll(true); } catch (er) { s.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); } };
   $('#tIsta').onclick = e => { const b = e.target.closest('[data-go]'); if (b) select(b.dataset.go); };
 }
+function bindOrgColors() {
+  $('#tOrgs').onchange = e => { const inp = e.target.closest('input.ocol'); if (!inp) return; const o = ORGS.find(x => x.name === inp.closest('tr').dataset.org); if (o) saveOrg({ ...o, color: inp.value }, null); };
+}
 function renderOrgs() {
+  bindOrgColors();
   const A = per.from, B = per.to, P = dnum(B) - dnum(A) + 1;
   const I = istaPeriod(), IP = dnum(I.to) - dnum(I.from) + 1;
   const rs = Object.values(S.rooms);
@@ -308,8 +325,21 @@ function renderOrgs() {
     <div class="card"><span class="k">Verhuurbare m² (gekend)</span><span class="v">${m2f(privTot)}</span><span class="k">Gemeenschappelijk: ${m2f(comTot)}</span></div>
     <div class="card"><span class="k">Gemiddelde leegstand in periode</span><span class="v">${m2f(vacant)}</span><span class="k">${privTot ? (vacant / privTot * 100).toFixed(1) : 0}% van verhuurbaar</span></div>
     <div class="card"><span class="k">Ruimten zonder m²</span><span class="v">${unmeasured}</span><span class="k">Totalen zijn pas volledig na opmeting.</span></div>`;
+  const dis = canWrite ? '' : 'disabled';
+  $('#orgNew').innerHTML = canWrite ? `<b>Nieuwe organisatie</b>
+    <input id="noName" placeholder="Naam (bv. Brussel Helpt vzw)" aria-label="Naam" style="flex:1 1 220px">
+    <label>Kleur <input type="color" id="noColor" value="#c9e4f5"></label>
+    <select id="noType" aria-label="Soort"><option>Huurder</option><option>Eigenaar</option><option>Partner</option></select>
+    <button class="btn primary" id="noAdd">Toevoegen</button><span id="noMsg"></span>` : '';
+  if (canWrite) $('#noAdd').onclick = async () => {
+    const name = $('#noName').value.trim(), msg = $('#noMsg');
+    if (!name) { msg.className = 'err'; msg.textContent = 'Geef een naam in.'; return; }
+    if (ORGS.some(o => o.name.toLowerCase() === name.toLowerCase())) { msg.className = 'err'; msg.textContent = 'Deze organisatie bestaat al.'; return; }
+    msg.className = ''; msg.textContent = 'Opslaan…';
+    await saveOrg({ name, color: $('#noColor').value, type: $('#noType').value }, msg);
+  };
   $('#tOrgs').innerHTML = `<thead><tr><th>Organisatie</th><th class="num">Ruimten in periode</th><th class="num">Nu (${dfmt(peil)})</th><th class="num">Gem. privatief m²</th><th>Aandeel</th><th class="num">Aandeel gemeensch. m²</th><th class="num">Totaal m²</th><th class="num">Verwarming Ista ${esc(S.settings.period || '')}</th></tr></thead><tbody>` +
-    rows.map(x => `<tr><td><span class="swatch" style="background:${x.o.color}"></span>${esc(x.o.name)}</td><td class="num">${x.n}</td><td class="num">${x.now}</td><td class="num mono">${m2f(x.avg)}</td>
+    rows.map(x => `<tr data-org="${esc(x.o.name)}"><td><input type="color" class="ocol" value="${esc(x.o.color)}" ${dis} title="Kleur wijzigen" aria-label="Kleur ${esc(x.o.name)}"> ${esc(x.o.name)} <span class="empty" style="font-size:11px">${esc(x.o.type || '')}</span></td><td class="num">${x.n}</td><td class="num">${x.now}</td><td class="num mono">${m2f(x.avg)}</td>
       <td style="min-width:140px"><div class="bar"><span style="width:${(x.share * 100).toFixed(1)}%;background:${x.o.color}"></span></div><span class="mono" style="font-size:12px">${(x.share * 100).toFixed(2)}%</span></td>
       <td class="num mono">${m2f(x.com)}</td><td class="num mono">${m2f(x.avg + x.com)}</td><td class="num mono">${x.heat ? eur(x.heat) : '–'}</td></tr>`).join('') +
     `</tbody><tfoot><tr><th>Leegstand</th><th></th><th></th><th class="num mono">${m2f(vacant)}</th><th class="mono" style="font-size:12px">${privTot ? (vacant / privTot * 100).toFixed(2) : 0}%</th><th></th><th></th><th></th></tr></tfoot>`;

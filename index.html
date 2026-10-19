@@ -135,6 +135,10 @@ table.occ th { text-align: left; font-weight: 500; color: var(--muted); font-siz
 table.occ td { padding: 3px 4px; border-top: 1px solid var(--line) }
 table.occ tr.now td:first-child { font-weight: 600 }
 table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); width: 100% }
+.orgnew { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--sheet); font-size: 13px }
+.orgnew input, .orgnew select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: var(--r); background: var(--paper); color: var(--ink) }
+.orgnew input[type=color], input.ocol { padding: 0; width: 30px; height: 24px; border: 1px solid var(--line); border-radius: 4px; vertical-align: middle; cursor: pointer; background: none }
+#noMsg.saved { color: var(--ok, #1b7f3b) } #noMsg.err { color: var(--bad) }
 </style>
 </head>
 <body>
@@ -204,6 +208,7 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
     <button class="btn" id="pIsta">Ista-periode</button><button class="btn" id="pYear">Kalenderjaar</button>
     <span class="chip">m²: gemeten, anders plan</span><button class="btn" id="expOcc">Bezetting exporteren (CSV)</button></div>
   <div class="cards" id="orgCards"></div>
+  <div class="orgnew" id="orgNew"></div>
   <div class="tscroll"><table id="tOrgs"></table></div>
 </section>
 
@@ -211,8 +216,8 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=5"></script>
-<script src="graph.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="config.js?v=6"></script>
+<script src="graph.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>
