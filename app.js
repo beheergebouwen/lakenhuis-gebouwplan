@@ -149,6 +149,7 @@ function renderPlan() {
   let g = '';
   for (const [id, geo] of Object.entries(GEO.rooms)) {
     if (geo.floor !== floor) continue;
+    if (geo.out) { g += `<path class="n out" d="${geo.poly.map(p => 'M' + p.replace(/ /g, 'L') + 'Z').join('')}" fill="${css('--x')}" stroke="${css('--x')}" style="pointer-events:none"/>`; continue; }
     const isRef = !!geo.ref; const code = isRef ? geo.ref : id;
     const r = roomOf(code) || {};
     const stroke = css(USEV[r.use] || '--t');
