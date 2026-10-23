@@ -417,7 +417,7 @@ function renderOcc() {
   $('#tOcc').onclick = e => { const tr = e.target.closest('tr.click'); if (tr) select(tr.dataset.code); };
 }
 // ---------- afrekening: kostenposten + verdeelsleutels
-const CATS = ['Water (algemene meter)', 'Elektriciteit algemeen', 'Elektriciteit eigen meter', 'Gas / verwarming', 'Schoonmaak', 'Herstelling / onderhoud', 'Lift', 'Keuringen / brandveiligheid', 'Verzekering', 'Afval', 'Telefoon / internet', 'Huur / huurvermindering', 'Andere'];
+const CATS = ['Water (algemene meter)', 'Elektriciteit algemeen', 'Elektriciteit eigen meter', 'Gas / verwarming', 'Ista – opname/beheer', 'Schoonmaak', 'Herstelling / onderhoud', 'Lift', 'Keuringen / brandveiligheid', 'Verzekering', 'Afval', 'Telefoon / internet', 'Huur / huurvermindering', 'Andere'];
 const KEYS = ['m² × dagen bezetting', 'Ista-verbruik', 'Gelijke delen (huurders)', 'Rechtstreeks aan één organisatie', 'Eigen m² + gemeensch. naar aanwezigen (m²)', 'Eigen m² + gemeensch. naar aanwezigen (gelijk)', 'Bezette m² (leegstand niet aangerekend)'];
 const KDEF = KEYS[6];   // standaardsleutel voor huurlasten
 // gemeenschappelijk deel: per dag verdeeld over wie die dag een verhuurbare ruimte gebruikt (naar m² of gelijk); niemand aanwezig → De Overmolen
@@ -617,7 +617,7 @@ function catKey(gl, desc, rel) {
     case '6110': cat = 'Huur / huurvermindering'; key = KEYS[3]; org = 'De Overmolen'; warn = 'Huur – niet verdelen'; break;
     case '6115': cat = 'Afval'; break;
     case '6121': cat = 'Water (algemene meter)'; break;
-    case '6122': cat = 'Gas / verwarming'; key = KEYS[1]; break;
+    case '6122': if (/\bista\b/.test(d)) { cat = 'Ista – opname/beheer'; } else { cat = 'Gas / verwarming'; key = KEYS[1]; } break;   // Ista-facturen = gewone huurlasten
     case '6123': cat = 'Elektriciteit algemeen'; break;
     case '6125': cat = 'Telefoon / internet'; break;
     case '6141': cat = 'Verzekering'; break;
