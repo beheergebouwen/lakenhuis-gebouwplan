@@ -418,7 +418,8 @@ function renderOcc() {
 const CATS = ['Water (algemene meter)', 'Elektriciteit algemeen', 'Elektriciteit eigen meter', 'Gas / verwarming', 'Schoonmaak', 'Herstelling / onderhoud', 'Lift', 'Keuringen / brandveiligheid', 'Verzekering', 'Afval', 'Telefoon / internet', 'Huur / huurvermindering', 'Andere'];
 const KEYS = ['m² × dagen bezetting', 'Ista-verbruik', 'Gelijke delen (huurders)', 'Rechtstreeks aan één organisatie', 'Eigen m² + gemeensch. naar aanwezigen (m²)', 'Eigen m² + gemeensch. naar aanwezigen (gelijk)'];
 // gemeenschappelijk deel: per dag verdeeld over wie die dag een verhuurbare ruimte gebruikt (naar m² of gelijk); niemand aanwezig → De Overmolen
-let PSC = {};
+let PSC = {}, SIMKEY = '';
+const keyOf = c => SIMKEY && c.key !== KEYS[3] ? SIMKEY : (c.key || KEYS[0]);
 function orgOnDay(r, day) { const rows = occOf(r.code); if (!rows.length) return r.org || ''; const o = rows.find(o => isOpen(o, day)); return o ? o.org : ''; }
 function presentShares(A, B, equal) {
   const ck = A + B + equal; if (PSC[ck]) return PSC[ck];
@@ -470,7 +471,7 @@ function ovl(c) {
 }
 const amtIn = c => (Number(c.amount) || 0) * ovl(c).f;
 function split(c) {
-  const { A, B, f } = ovl(c), w = weights(c.key || KEYS[0], A, B, c.org), T = Object.values(w).reduce((a, b) => a + b, 0), amt = (Number(c.amount) || 0) * f, out = {};
+  const { A, B, f } = ovl(c), w = weights(keyOf(c), A, B, c.org), T = Object.values(w).reduce((a, b) => a + b, 0), amt = (Number(c.amount) || 0) * f, out = {};
   if (T > 0) for (const [o, v] of Object.entries(w)) out[o] = amt * v / T;
   return out;
 }
@@ -479,6 +480,8 @@ function bindAfr() {
   if (bindAfr.done) return; bindAfr.done = true;
   $('#aFrom').onchange = $('#aTo').onchange = () => setPeriod($('#aFrom').value, $('#aTo').value);
   $('#aIsta').onclick = () => { const I = istaPeriod(); setPeriod(I.from, I.to); };
+  $('#aSim').innerHTML = '<option value="">Sleutel per kostenlijn</option>' + KEYS.filter(k => k !== KEYS[3]).map(k => `<option>${esc(k)}</option>`).join('');
+  $('#aSim').onchange = () => { SIMKEY = $('#aSim').value; PSC = {}; renderAfr(); };
   $('#aYear').onclick = () => { const y = peil.slice(0, 4); setPeriod(y + '-01-01', y + '-12-31'); };
   $('#aPrint').onclick = () => { document.body.classList.add('print-afr'); window.print(); setTimeout(() => document.body.classList.remove('print-afr'), 500); };
   $('#aExp').onclick = () => { PSC = {}; const cs = costsInPeriod(), orgs = afrOrgs(cs);
@@ -519,6 +522,7 @@ function renderAfr() {
   const vo = {}; VOS.filter(v => v.date && v.date >= per.from && v.date <= per.to).forEach(v => { vo[v.org] = (vo[v.org] || 0) + (Number(v.amount) || 0); });
   const sorgs = [...orgs, ...Object.keys(vo).filter(o => !orgs.includes(o))];
   const saldo = o => (tot[o] || 0) - (vo[o] || 0);
+  $('#afrSimNote').hidden = !SIMKEY; $('#afrSimNote').textContent = SIMKEY ? `Simulatie: alle kostenlijnen (behalve 'Rechtstreeks') berekend met "${SIMKEY}". Niets wordt opgeslagen – zet terug op 'Sleutel per kostenlijn' voor de echte afrekening.` : '';
   $('#afrCards').innerHTML = `<div class="card"><span class="k">Periode</span><span class="v" style="font-size:20px">${dfmt(per.from)} – ${dfmt(per.to)}</span><span class="k">${cs.length} kostenposten</span></div>
     <div class="card"><span class="k">Totale kosten</span><span class="v">${eur2(total)}</span></div>` +
     sorgs.map(o => `<div class="card"><span class="k"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</span><span class="v">${eur2(tot[o] || 0)}</span><span class="k">${total ? ((tot[o] || 0) / total * 100).toFixed(1) : 0}% van totaal${vo[o] ? ` · voorschot ${eur2(vo[o])}<br><b class="${saldo(o) > 0 ? 'err' : 'saved'}">${saldo(o) > 0 ? 'te betalen ' + eur2(saldo(o)) : 'terug ' + eur2(-saldo(o))}</b>` : ''}</span></div>`).join('');
@@ -526,10 +530,19 @@ function renderAfr() {
     sorgs.map(o => `<tr><td><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</td><td class="num mono">${eur2(tot[o] || 0)}</td><td class="num mono">${vo[o] ? eur2(vo[o]) : '–'}</td><td class="num mono"><b>${eur2(saldo(o))}</b></td><td>${o === 'De Overmolen' ? '<span class="empty">eigen deel / leegstand</span>' : saldo(o) > 0.005 ? '<span class="err">te betalen</span>' : saldo(o) < -0.005 ? '<span class="saved">terug te krijgen</span>' : ''}</td></tr>`).join('') +
     `</tbody><tfoot><tr><th>Totaal</th><th class="num mono">${eur2(Object.values(tot).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(Object.values(vo).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(sorgs.reduce((a, o) => a + saldo(o), 0))}</th><th></th></tr></tfoot>` : '';
   $('#tAfr').innerHTML = cs.length ? `<thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Sleutel</th>${orgs.map(o => `<th class="num"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</th>`).join('')}<th></th></tr></thead><tbody>` +
-    cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td>${esc(c.cat)}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.entry && 'boekstuk ' + c.entry, c.gl, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}</td>
-      <td class="mono" style="font-size:12px">${dfmt(c.from)}<br>${dfmt(c.to)}</td><td class="num mono">${eur2(amtIn(c))}${ovl(c).f < 0.9999 ? `<br><span class="empty" style="font-size:10px">${Math.round(ovl(c).f * 100)}% van ${eur2(Number(c.amount) || 0)}</span>` : ''}</td><td style="font-size:12px">${esc(c.key)}${c.org ? '<br><b>' + esc(c.org) + '</b>' : ''}</td>
+    cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td>${canWrite ? `<select class="ce" data-f="cat">${[...new Set([...CATS, c.cat || ''])].filter(Boolean).map(x => `<option${x === c.cat ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : esc(c.cat)}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.entry && 'boekstuk ' + c.entry, c.gl, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}</td>
+      <td class="mono" style="font-size:12px;white-space:nowrap">${canWrite ? `<input type="date" class="ce" data-f="from" value="${c.from || ''}"><br><input type="date" class="ce" data-f="to" value="${c.to || ''}">` : dfmt(c.from) + '<br>' + dfmt(c.to)}</td><td class="num mono">${eur2(amtIn(c))}${ovl(c).f < 0.9999 ? `<br><span class="empty" style="font-size:10px">${Math.round(ovl(c).f * 100)}% van ${eur2(Number(c.amount) || 0)}</span>` : ''}</td><td style="font-size:12px">${canWrite ? `<select class="ce" data-f="key">${KEYS.map(k => `<option${k === (c.key || KEYS[0]) ? ' selected' : ''}>${esc(k)}</option>`).join('')}</select>${c.key === KEYS[3] ? `<br><select class="ce" data-f="org">${ORGS.map(o => `<option${o.name === c.org ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select>` : ''}` : esc(c.key) + (c.org ? '<br><b>' + esc(c.org) + '</b>' : '')}${SIMKEY && c.key !== KEYS[3] ? '<br><span class="imp-warn">simulatie: ' + esc(SIMKEY) + '</span>' : ''}</td>
       ${orgs.map(o => `<td class="num mono">${sp[o] ? eur2(sp[o]) : '–'}</td>`).join('')}<td>${canWrite ? '<button class="occdel cdel" title="Verwijderen">✕</button>' : ''}</td></tr>`; }).join('') +
     `</tbody><tfoot><tr><th colspan="3">Totaal</th><th class="num mono">${eur2(total)}</th><th></th>${orgs.map(o => `<th class="num mono">${eur2(tot[o] || 0)}</th>`).join('')}<th></th></tr></tfoot>` : '<tbody><tr><td class="empty">Nog geen kostenposten in deze periode. Voeg ze hierboven toe.</td></tr></tbody>';
+  $('#tAfr').onchange = async e => {
+    const el = e.target.closest('.ce'); if (!el) return; const tr = el.closest('tr'), c = COSTS.find(x => String(x._id) === tr.dataset.id); if (!c) return;
+    const f = el.dataset.f, patch = { _id: c._id, [f]: el.value };
+    if (f === 'key') { patch.org = el.value === KEYS[3] ? (c.org || 'De Overmolen') : ''; }
+    if (f === 'cat') { /* enkel categorie */ }
+    if ((f === 'from' && el.value > (c.to || '9')) || (f === 'to' && el.value < (c.from || '0'))) { setStatus('ro', "'Tot' ligt vóór 'Van' – niet opgeslagen"); renderAfr(); return; }
+    try { await LK.save('costs', patch); Object.assign(c, patch); PSC = {}; renderAfr(); setStatus('live', 'Kostenpost aangepast · herberekend · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); }
+    catch (er) { setStatus('ro', 'Niet opgeslagen: ' + (er.status === 403 ? 'geen bewerkrechten' : er.message)); renderAfr(); }
+  };
   $('#tAfr').onclick = async e => {
     const b = e.target.closest('.cdel'); if (!b) return; const tr = b.closest('tr');
     if (!tr.dataset.confirm) { tr.dataset.confirm = 1; b.textContent = 'Zeker?'; b.style.width = 'auto'; return; }

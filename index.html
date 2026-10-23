@@ -175,6 +175,8 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 .imp-t select, .imp-t input[type=date] { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); max-width: 190px }
 .imp-t tr.chg td { background: #fff8e1 } .imp-t tr.del td { background: #fdecea }
 .imp-vo { max-width: 460px }
+#tAfr select.ce, #tAfr input.ce { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); max-width: 200px }
+#aSim { max-width: 260px }
 @media print { body.print-afr header.top, body.print-afr #afrNew, body.print-afr #afrImp, body.print-afr #afrLog, body.print-afr .tablebar button, body.print-afr .cdel, body.print-afr footer, body.print-afr section.view:not(#v-afr) { display: none !important } body.print-afr #v-afr { display: block !important } }
 </style>
 </head>
@@ -256,10 +258,12 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
   <div class="tablebar"><h2>Afrekening</h2>
     <label>Van <input type="date" id="aFrom"></label><label>Tot <input type="date" id="aTo"></label>
     <button class="btn" id="aIsta">Ista-periode</button><button class="btn" id="aYear">Kalenderjaar</button>
+    <label>Simulatie <select id="aSim" aria-label="Simulatie sleutel"></select></label>
     <button class="btn" id="aImp">Importeer Exact (CSV)</button><input type="file" id="aImpFile" accept=".csv,.txt,text/csv" hidden>
     <button class="btn" id="aExp">Exporteer (CSV)</button><button class="btn" id="aPrint">Afdrukken / PDF</button></div>
   <p class="empty" id="afrLog" style="font-size:12px;margin:-4px 0 8px"></p>
   <div id="afrImp" hidden></div>
+  <p id="afrSimNote" class="imp-warn" hidden style="margin:0 0 8px"></p>
   <div class="cards" id="afrCards"></div>
   <div class="orgnew" id="afrNew"></div>
   <div class="tscroll"><table id="tAfr"></table></div>
@@ -283,8 +287,8 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=14"></script>
-<script src="graph.js?v=14"></script>
-<script src="app.js?v=14"></script>
+<script src="config.js?v=15"></script>
+<script src="graph.js?v=15"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>
