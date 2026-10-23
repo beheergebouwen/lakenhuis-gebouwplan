@@ -16,7 +16,7 @@ const orgColor = o => { const x = ORGS.find(g => g.name === o); return x ? x.col
 
 let GEO, canWrite = true; const IMG = {};
 // ---------- bezetting (wie zat waar, van wanneer tot wanneer)
-let OCC = [], COSTS = [];                                    // {_id, room, org, from, to, note}  (datums YYYY-MM-DD, leeg = onbekend / lopend)
+let OCC = [], COSTS = [], VOS = [], IMPS = [];                                    // {_id, room, org, from, to, note}  (datums YYYY-MM-DD, leeg = onbekend / lopend)
 const ymd = d => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels' }).format(d);
 const dnum = s => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 864e5;
 const addDays = (s, n) => new Date((dnum(s) + n) * 864e5).toISOString().slice(0, 10);
@@ -55,8 +55,8 @@ async function boot() {
   setInterval(() => { if (!document.hidden && !document.activeElement?.closest('form,select,input,textarea')) reload().then(() => renderAll(true)); }, 60000);
 }
 async function reload(first) {
-  const [rooms, doors, meters, orgs, settings, occ, costs] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ', 'costs'].map(k => LK.load(k).catch(() => null)));
-  COSTS = costs || [];
+  const [rooms, doors, meters, orgs, settings, occ, costs, vo, imp] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ', 'costs', 'vo', 'imp'].map(k => LK.load(k).catch(() => null)));
+  COSTS = costs || []; VOS = (vo || []).filter(v => v.org); IMPS = imp || [];
   OCC = (occ || []).filter(o => o.room && o.org);
   if (!rooms) { setStatus('ro', 'Lijsten niet gevonden'); const n = $('#notice'); n.hidden = false; n.textContent = 'De SharePoint-lijsten bestaan nog niet. Laat IT eenmalig setup/ uitvoeren (zie handleiding).'; throw new Error('no lists'); }
   S.rooms = Object.fromEntries(rooms.map(r => [r.code, r])); S.doors = Object.fromEntries(doors.map(d => [d.code, d]));
@@ -415,7 +415,7 @@ function renderOcc() {
   $('#tOcc').onclick = e => { const tr = e.target.closest('tr.click'); if (tr) select(tr.dataset.code); };
 }
 // ---------- afrekening: kostenposten + verdeelsleutels
-const CATS = ['Water (algemene meter)', 'Elektriciteit algemeen', 'Elektriciteit eigen meter', 'Gas / verwarming', 'Schoonmaak', 'Herstelling / onderhoud', 'Lift', 'Verzekering', 'Afval', 'Andere'];
+const CATS = ['Water (algemene meter)', 'Elektriciteit algemeen', 'Elektriciteit eigen meter', 'Gas / verwarming', 'Schoonmaak', 'Herstelling / onderhoud', 'Lift', 'Keuringen / brandveiligheid', 'Verzekering', 'Afval', 'Telefoon / internet', 'Huur / huurvermindering', 'Andere'];
 const KEYS = ['m² × dagen bezetting', 'Ista-verbruik', 'Gelijke delen (huurders)', 'Rechtstreeks aan één organisatie'];
 const eur2 = n => (Math.round(n * 100) / 100).toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' });
 function weights(key, A, B, org) {
@@ -436,8 +436,15 @@ function weights(key, A, B, org) {
   const used = Object.values(w).reduce((a, b) => a + b, 0); if (tot > used) w['De Overmolen'] = (w['De Overmolen'] || 0) + (tot - used);
   return w;
 }
+// deel van een kost dat in de gekozen periode valt (pro rata dagen)
+function ovl(c) {
+  const A = c.from && c.from > per.from ? c.from : per.from, B = c.to && c.to < per.to ? c.to : per.to;
+  const d = Math.max(0, dnum(B) - dnum(A) + 1), tot = c.from && c.to ? dnum(c.to) - dnum(c.from) + 1 : d;
+  return { A, B, f: tot > 0 ? Math.min(1, d / tot) : 1 };
+}
+const amtIn = c => (Number(c.amount) || 0) * ovl(c).f;
 function split(c) {
-  const A = c.from || per.from, B = c.to || per.to, w = weights(c.key || KEYS[0], A, B, c.org), T = Object.values(w).reduce((a, b) => a + b, 0), amt = Number(c.amount) || 0, out = {};
+  const { A, B, f } = ovl(c), w = weights(c.key || KEYS[0], A, B, c.org), T = Object.values(w).reduce((a, b) => a + b, 0), amt = (Number(c.amount) || 0) * f, out = {};
   if (T > 0) for (const [o, v] of Object.entries(w)) out[o] = amt * v / T;
   return out;
 }
@@ -450,11 +457,13 @@ function bindAfr() {
   $('#aPrint').onclick = () => { document.body.classList.add('print-afr'); window.print(); setTimeout(() => document.body.classList.remove('print-afr'), 500); };
   $('#aExp').onclick = () => { const cs = costsInPeriod(), orgs = afrOrgs(cs);
     exportCsv('Lakenhuis_afrekening_' + per.from + '_' + per.to + '.csv', ['categorie', 'omschrijving', 'leverancier', 'factuur', 'meter', 'van', 'tot', 'bedrag', 'sleutel', ...orgs],
-      cs.map(c => { const sp = split(c); return [c.cat, c.desc, c.supplier, c.invoice, c.meter, dfmt(c.from), dfmt(c.to), (Number(c.amount) || 0).toFixed(2), c.key + (c.org ? ' (' + c.org + ')' : ''), ...orgs.map(o => (sp[o] || 0).toFixed(2))]; })); };
+      cs.map(c => { const sp = split(c); return [c.cat, c.desc, c.supplier, c.invoice || c.entry, c.meter, dfmt(c.from), dfmt(c.to), amtIn(c).toFixed(2), c.key + (c.org ? ' (' + c.org + ')' : ''), ...orgs.map(o => (sp[o] || 0).toFixed(2))]; })); };
 }
 function afrOrgs(cs) { const set = new Set(); cs.forEach(c => Object.keys(split(c)).forEach(o => set.add(o))); return [...ORGS.map(o => o.name).filter(n => set.has(n)), ...[...set].filter(n => !ORGS.some(o => o.name === n))]; }
 function renderAfr() {
-  if (!per || !$('#v-afr')) return; bindAfr();
+  if (!per || !$('#v-afr')) return; bindAfr(); bindImport();
+  const li = IMPS.slice().sort((a, b) => (b._id | 0) - (a._id | 0))[0];
+  $('#afrLog').innerHTML = li ? `Laatste import: <b>${esc(li.file)}</b> op ${esc(li.at)} (boekdatum ${dfmt(li.from)} – ${dfmt(li.to)}, ${li.added || 0} nieuw, ${li.changed || 0} bijgewerkt, ${li.removed || 0} verwijderd) · ${IMPS.length} import(s) in totaal` : 'Nog geen import uit Exact.';
   $('#aFrom').value = per.from; $('#aTo').value = per.to;
   const dis = canWrite;
   $('#afrNew').innerHTML = dis ? `<b>Nieuwe kostenpost</b>
@@ -480,13 +489,19 @@ function renderAfr() {
     };
   }
   const cs = costsInPeriod(), orgs = afrOrgs(cs), tot = {}; let total = 0;
-  cs.forEach(c => { const sp = split(c); total += Number(c.amount) || 0; for (const [o, v] of Object.entries(sp)) tot[o] = (tot[o] || 0) + v; });
+  cs.forEach(c => { const sp = split(c); total += amtIn(c); for (const [o, v] of Object.entries(sp)) tot[o] = (tot[o] || 0) + v; });
+  const vo = {}; VOS.filter(v => v.date && v.date >= per.from && v.date <= per.to).forEach(v => { vo[v.org] = (vo[v.org] || 0) + (Number(v.amount) || 0); });
+  const sorgs = [...orgs, ...Object.keys(vo).filter(o => !orgs.includes(o))];
+  const saldo = o => (tot[o] || 0) - (vo[o] || 0);
   $('#afrCards').innerHTML = `<div class="card"><span class="k">Periode</span><span class="v" style="font-size:20px">${dfmt(per.from)} – ${dfmt(per.to)}</span><span class="k">${cs.length} kostenposten</span></div>
     <div class="card"><span class="k">Totale kosten</span><span class="v">${eur2(total)}</span></div>` +
-    orgs.map(o => `<div class="card"><span class="k"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</span><span class="v">${eur2(tot[o] || 0)}</span><span class="k">${total ? ((tot[o] || 0) / total * 100).toFixed(1) : 0}% van totaal</span></div>`).join('');
+    sorgs.map(o => `<div class="card"><span class="k"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</span><span class="v">${eur2(tot[o] || 0)}</span><span class="k">${total ? ((tot[o] || 0) / total * 100).toFixed(1) : 0}% van totaal${vo[o] ? ` · voorschot ${eur2(vo[o])}<br><b class="${saldo(o) > 0 ? 'err' : 'saved'}">${saldo(o) > 0 ? 'te betalen ' + eur2(saldo(o)) : 'terug ' + eur2(-saldo(o))}</b>` : ''}</span></div>`).join('');
+  $('#tSaldo').innerHTML = sorgs.length ? `<thead><tr><th>Organisatie</th><th class="num">Aandeel kosten</th><th class="num">Betaalde voorschotten</th><th class="num">Saldo</th><th></th></tr></thead><tbody>` +
+    sorgs.map(o => `<tr><td><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</td><td class="num mono">${eur2(tot[o] || 0)}</td><td class="num mono">${vo[o] ? eur2(vo[o]) : '–'}</td><td class="num mono"><b>${eur2(saldo(o))}</b></td><td>${o === 'De Overmolen' ? '<span class="empty">eigen deel / leegstand</span>' : saldo(o) > 0.005 ? '<span class="err">te betalen</span>' : saldo(o) < -0.005 ? '<span class="saved">terug te krijgen</span>' : ''}</td></tr>`).join('') +
+    `</tbody><tfoot><tr><th>Totaal</th><th class="num mono">${eur2(Object.values(tot).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(Object.values(vo).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(sorgs.reduce((a, o) => a + saldo(o), 0))}</th><th></th></tr></tfoot>` : '';
   $('#tAfr').innerHTML = cs.length ? `<thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Sleutel</th>${orgs.map(o => `<th class="num"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</th>`).join('')}<th></th></tr></thead><tbody>` +
-    cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td>${esc(c.cat)}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}</td>
-      <td class="mono" style="font-size:12px">${dfmt(c.from)}<br>${dfmt(c.to)}</td><td class="num mono">${eur2(Number(c.amount) || 0)}</td><td style="font-size:12px">${esc(c.key)}${c.org ? '<br><b>' + esc(c.org) + '</b>' : ''}</td>
+    cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td>${esc(c.cat)}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.entry && 'boekstuk ' + c.entry, c.gl, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}</td>
+      <td class="mono" style="font-size:12px">${dfmt(c.from)}<br>${dfmt(c.to)}</td><td class="num mono">${eur2(amtIn(c))}${ovl(c).f < 0.9999 ? `<br><span class="empty" style="font-size:10px">${Math.round(ovl(c).f * 100)}% van ${eur2(Number(c.amount) || 0)}</span>` : ''}</td><td style="font-size:12px">${esc(c.key)}${c.org ? '<br><b>' + esc(c.org) + '</b>' : ''}</td>
       ${orgs.map(o => `<td class="num mono">${sp[o] ? eur2(sp[o]) : '–'}</td>`).join('')}<td>${canWrite ? '<button class="occdel cdel" title="Verwijderen">✕</button>' : ''}</td></tr>`; }).join('') +
     `</tbody><tfoot><tr><th colspan="3">Totaal</th><th class="num mono">${eur2(total)}</th><th></th>${orgs.map(o => `<th class="num mono">${eur2(tot[o] || 0)}</th>`).join('')}<th></th></tr></tfoot>` : '<tbody><tr><td class="empty">Nog geen kostenposten in deze periode. Voeg ze hierboven toe.</td></tr></tbody>';
   $('#tAfr').onclick = async e => {
@@ -495,6 +510,201 @@ function renderAfr() {
     const c = COSTS.find(x => String(x._id) === tr.dataset.id); if (!c) return;
     try { await LK.remove('costs', c._id); COSTS = COSTS.filter(x => x !== c); renderAfr(); } catch (er) { setStatus('ro', 'Niet verwijderd: ' + er.message); }
   };
+}
+// ---------- import Exact Online (export "FinTransactionSearch": CSV/TXT, tab of ; gescheiden, UTF-16 of UTF-8)
+const ORG_ALIAS = [[/accolage/i, 'Accolage'], [/huisartsenkring|\bbhak\b/i, 'BHAK'], [/ondersteuningsplan|^d\.?o\.?p\.?$/i, 'DOP'], [/huis voor gezondheid/i, 'Huis voor Gezondheid'], [/kenniscentrum|\bwwz\b/i, 'Kenniscentrum WWZ'], [/overmolen/i, 'De Overmolen']];
+let ORGMAP = {}; try { ORGMAP = JSON.parse(localStorage.getItem('lk.orgmap') || '{}'); } catch (e) {}
+function mapOrg(n) {
+  if (!n) return ''; if (ORGMAP[n]) return ORGMAP[n];
+  const exact = ORGS.find(x => x.name.toLowerCase() === n.toLowerCase()); if (exact) return exact.name;
+  for (const [re, v] of ORG_ALIAS) if (re.test(n)) { const o = ORGS.find(x => x.name.toLowerCase() === v.toLowerCase()); return o ? o.name : v; }
+  return '';
+}
+const HDR = { date: ['EntryDate', 'Boekdatum', 'Datum'], entry: ['EntryNumber', 'Boekstuknummer', 'Boekstuk'], journal: ['JournalCodeDescriptionCode', 'Dagboek', 'Dagboekcode'],
+  journalName: ['JournalCodeDescriptionDescription', 'Dagboek omschrijving'], gl: ['GLAccountCodeDescriptionCode', 'Grootboekrekening', 'Grootboek'],
+  glName: ['GLAccountCodeDescriptionDescription', 'Grootboekrekening omschrijving'], desc: ['Description', 'Omschrijving'], rel: ['AccountCodeNameDescription', 'Relatie', 'Naam'],
+  amount: ['AmountDC', 'Bedrag', 'Bedrag DC'], cc: ['CostCenterCodeDescriptionDescription', 'Kostenplaats'] };
+function decodeFile(buf) {
+  const b = new Uint8Array(buf);
+  if (b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf);
+  if (b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder('utf-16be').decode(buf);
+  return new TextDecoder('utf-8').decode(buf).replace(/^\uFEFF/, '');
+}
+function parseDelim(t) {
+  const first = t.split(/\r?\n/, 1)[0], sep = ['\t', ';', ','].map(s => [s, first.split(s).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true; else if (c === sep) { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && t[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+    else f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows.filter(r => r.some(x => x.trim() !== '')).map(r => r.map(x => x.trim()));
+}
+const numNL = s => { s = String(s).replace(/[\s\u00a0€]/g, ''); if (!s) return 0; if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.'); return Number(s) || 0; };
+const isoD = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const lastDay = (y, m) => new Date(Date.UTC(+y, +m, 0)).getUTCDate();
+const toIso = s => { const m = String(s).match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/); if (m) return isoD(m[3], m[2], m[1]); const k = String(s).match(/^(\d{4})-(\d\d)-(\d\d)/); return k ? k[0] : ''; };
+const okP = (a, b) => a && b && !isNaN(dnum(a)) && !isNaN(dnum(b)) && a <= b && dnum(b) - dnum(a) <= 400;
+function periodOf(desc, date) {
+  let m = desc.match(/\((\d\d)-(\d\d)-(\d{4})\s*-\s*(\d\d)-(\d\d)-(\d{4})\)/);
+  if (m) { const a = isoD(m[3], m[2], m[1]), b = isoD(m[6], m[5], m[4]); if (okP(a, b)) return [a, b, 'uit omschrijving']; }
+  m = desc.match(/\b(20\d\d)(0[1-9]|1[0-2])([0-3]\d)\s*-\s*(20\d\d)(0[1-9]|1[0-2])([0-3]\d)\b/);
+  if (m) { const a = isoD(m[1], m[2], m[3]), b = isoD(m[4], m[5], m[6]); if (okP(a, b)) return [a, b, 'uit omschrijving']; }
+  m = desc.match(/\b(20\d\d)(0[1-9]|1[0-2])\s*-\s*(20\d\d)(0[1-9]|1[0-2])\b/);
+  if (m) { const a = isoD(m[1], m[2], 1), b = isoD(m[3], m[4], lastDay(m[3], m[4])); if (okP(a, b)) return [a, b, 'uit omschrijving']; }
+  m = desc.match(/\b(\d\d)(0[1-9]|1[0-2])([0-3]\d)\s*-\s*(\d\d)(0[1-9]|1[0-2])([0-3]\d)\b/);
+  if (m) { const a = isoD(2000 + +m[1], m[2], m[3]), b = isoD(2000 + +m[4], m[5], m[6]); if (okP(a, b)) return [a, b, 'uit omschrijving']; }
+  const y = date.slice(0, 4), mo = date.slice(5, 7);
+  return [isoD(y, mo, 1), isoD(y, mo, lastDay(y, mo)), 'maand van boekdatum'];
+}
+function catKey(gl, desc, rel) {
+  const d = (desc + ' ' + rel).toLowerCase(); let cat = 'Andere', key = KEYS[0], org = '', warn = '';
+  if (/hovenier|passerstr|sint-joris|cellebroers/.test(desc.toLowerCase())) return { cat: 'Andere', key: KEYS[3], org: 'De Overmolen', warn: 'Andere locatie? → De Overmolen' };
+  switch (gl.slice(0, 4)) {
+    case '6101': cat = 'Schoonmaak'; break;
+    case '6104': cat = /poets|ramen|\biss\b|schoonma|opkuis/.test(d) ? 'Schoonmaak' : /afval|container|propret/.test(d) ? 'Afval' : 'Herstelling / onderhoud'; break;
+    case '6105': cat = /lift|pareyn/.test(d) ? 'Lift' : 'Herstelling / onderhoud'; break;
+    case '6107': cat = 'Keuringen / brandveiligheid'; break;
+    case '6108': cat = 'Herstelling / onderhoud'; break;
+    case '6110': cat = 'Huur / huurvermindering'; key = KEYS[3]; org = 'De Overmolen'; warn = 'Huur – niet verdelen'; break;
+    case '6115': cat = 'Afval'; break;
+    case '6121': cat = 'Water (algemene meter)'; break;
+    case '6122': cat = 'Gas / verwarming'; key = KEYS[1]; break;
+    case '6123': cat = 'Elektriciteit algemeen'; break;
+    case '6125': cat = 'Telefoon / internet'; break;
+    case '6141': cat = 'Verzekering'; break;
+  }
+  return { cat, key, org, warn };
+}
+function parseExact(text) {
+  const rows = parseDelim(text); if (rows.length < 2) throw new Error('Leeg bestand.');
+  const h = rows[0].map(x => x.toLowerCase()), ix = {};
+  for (const [k, names] of Object.entries(HDR)) { const i = names.map(n => h.indexOf(n.toLowerCase())).find(i => i >= 0); ix[k] = i == null ? -1 : i; }
+  const need = ['date', 'entry', 'gl', 'desc', 'amount'].filter(k => ix[k] < 0);
+  if (need.length) throw new Error('Kolommen niet gevonden (' + need.join(', ') + '). Gevonden kolommen: ' + rows[0].join(' | '));
+  const get = (r, k) => ix[k] >= 0 ? (r[ix[k]] || '') : '';
+  const lines = rows.slice(1).map(r => ({ date: toIso(get(r, 'date')), entry: get(r, 'entry'), journal: get(r, 'journal'), journalName: get(r, 'journalName'), gl: get(r, 'gl'), glName: get(r, 'glName'),
+    desc: get(r, 'desc'), rel: get(r, 'rel'), amount: numNL(get(r, 'amount')), cc: get(r, 'cc') })).filter(l => l.date && l.entry);
+  const groups = {}; for (const l of lines) (groups[l.entry + '|' + l.gl] = groups[l.entry + '|' + l.gl] || []).push(l);
+  for (const [k, ls] of Object.entries(groups)) { ls.sort((a, b) => a.desc.localeCompare(b.desc) || a.amount - b.amount); ls.forEach((l, i) => { l.uid = 'EX:' + k + '|' + (i + 1); }); }
+  const costs = [], vos = [], info = {};
+  for (const l of lines) {
+    const amt = Math.round(l.amount * 100) / 100;
+    if (/^6/.test(l.gl)) {
+      const [from, to, psrc] = periodOf(l.desc, l.date), ck = catKey(l.gl, l.desc, l.rel);
+      costs.push({ uid: l.uid, entry: l.entry, bdate: l.date, gl: (l.gl + ' ' + l.glName).trim(), desc: l.desc || l.glName, supplier: l.rel, amount: amt, from, to, psrc, cat: ck.cat, key: ck.key, org: ck.org, warn: ck.warn, src: 'Exact', invoice: '', meter: '', note: '' });
+    } else if (l.gl === '702000' && /^huur$/i.test(l.journal)) {
+      vos.push({ uid: l.uid, entry: l.entry, date: l.date, rel: l.rel, org: mapOrg(l.rel), amount: -amt, desc: l.desc, src: 'Exact' });
+    } else { const k = (l.journalName || l.journal) + ' · ' + l.gl + ' ' + l.glName; info[k] = info[k] || { n: 0, sum: 0 }; info[k].n++; info[k].sum += amt; }
+  }
+  // lijn zonder periode in de omschrijving: neem de periode van een andere lijn van hetzelfde boekstuk
+  for (const c of costs) if (c.psrc !== 'uit omschrijving') { const p = costs.find(x => x.entry === c.entry && x.psrc === 'uit omschrijving'); if (p) { c.from = p.from; c.to = p.to; c.psrc = 'zoals boekstuk ' + c.entry; } }
+  const dates = lines.map(l => l.date).sort();
+  return { lines, costs, vos, info, from: dates[0], to: dates[dates.length - 1], cc: [...new Set(lines.map(l => l.cc).filter(Boolean))] };
+}
+function diffImport(P) {
+  const R = { cAdd: [], cSame: [], cChg: [], cDel: [], vAdd: [], vSame: [], vChg: [], vDel: [] };
+  const inR = d => d && d >= P.from && d <= P.to;
+  const ec = new Map(COSTS.filter(c => c.uid).map(c => [c.uid, c])), seenC = new Set();
+  for (const c of P.costs) { seenC.add(c.uid); const o = ec.get(c.uid);
+    if (!o) R.cAdd.push(c); else if (Math.abs((Number(o.amount) || 0) - c.amount) > 0.004 || (o.desc || '') !== c.desc || (o.supplier || '') !== c.supplier) R.cChg.push({ n: c, o, on: true }); else R.cSame.push(c); }
+  for (const o of COSTS) if (o.src === 'Exact' && o.uid && !seenC.has(o.uid) && inR(o.bdate)) R.cDel.push({ o, on: true });
+  const ev = new Map(VOS.filter(v => v.uid).map(v => [v.uid, v])), seenV = new Set();
+  for (const v of P.vos) { seenV.add(v.uid); const o = ev.get(v.uid);
+    if (!o) R.vAdd.push(v); else if (Math.abs((Number(o.amount) || 0) - v.amount) > 0.004 || (o.desc || '') !== v.desc) R.vChg.push({ n: v, o, on: true }); else R.vSame.push(v); }
+  for (const o of VOS) if (o.src === 'Exact' && o.uid && !seenV.has(o.uid) && inR(o.date)) R.vDel.push({ o, on: true });
+  R.cAdd.forEach(c => { c.on = true; });
+  return R;
+}
+let IMP = null;   // {file, P, R}
+function bindImport() {
+  if (bindImport.done) return; bindImport.done = true;
+  $('#aImp').onclick = () => $('#aImpFile').click();
+  $('#aImpFile').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    const box = $('#afrImp'); box.hidden = false; box.innerHTML = '<p>Bestand lezen…</p>';
+    try { const P = parseExact(decodeFile(await f.arrayBuffer())); IMP = { file: f, P, R: diffImport(P) }; renderImport(); }
+    catch (er) { box.innerHTML = `<div class="occbox"><b class="err">Import mislukt:</b> ${esc(er.message)} <button class="btn" id="impX">Sluiten</button></div>`; $('#impX').onclick = () => { box.hidden = true; }; }
+  };
+}
+function renderImport() {
+  const box = $('#afrImp'); if (!IMP) { box.hidden = true; box.innerHTML = ''; return; }
+  const { file, P, R } = IMP, sum = a => a.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+  const unmapped = [...new Set(P.vos.filter(v => !v.org).map(v => v.rel))];
+  const opt = (arr, v) => arr.map(x => `<option${x === v ? ' selected' : ''}>${esc(x)}</option>`).join('');
+  const orgNames = ORGS.map(o => o.name);
+  const cRow = (c, i, kind) => `<tr class="${kind}" data-i="${i}" data-k="${kind}">
+    <td><input type="checkbox" class="ion" ${c.on !== false ? 'checked' : ''}></td><td class="mono" style="font-size:12px">${dfmt(c.bdate)}<br>${esc(c.entry)}</td>
+    <td class="wrap">${esc(c.desc)}<br><span class="empty" style="font-size:11px">${esc(c.supplier)} · ${esc(c.gl)}</span>${c.warn ? `<br><span class="imp-warn">⚠ ${esc(c.warn)}</span>` : ''}</td>
+    <td class="num mono">${eur2(c.amount)}</td>
+    <td><select class="icat">${opt(CATS, c.cat)}</select></td>
+    <td><select class="ikey">${opt(KEYS, c.key)}</select><select class="iorg" ${c.key === KEYS[3] ? '' : 'hidden'}>${opt(orgNames, c.org)}</select></td>
+    <td style="white-space:nowrap"><input type="date" class="ifrom" value="${c.from}"><br><input type="date" class="ito" value="${c.to}"><br><span class="empty" style="font-size:10px">${esc(c.psrc || '')}</span></td></tr>`;
+  const infoRows = Object.entries(P.info).sort((a, b) => b[1].n - a[1].n).map(([k, v]) => `<li><span>${esc(k)}</span><span class="mono">${v.n} lijnen · ${eur2(v.sum)}</span></li>`).join('');
+  const vByOrg = {}; [...R.vAdd, ...R.vSame, ...R.vChg.map(x => x.n)].forEach(v => { const k = v.org || '(' + v.rel + ')'; vByOrg[k] = (vByOrg[k] || 0) + v.amount; });
+  box.innerHTML = `<div class="occbox imp">
+    <div class="imp-head"><b>Import Exact: ${esc(file.name)}</b> <span class="chip">${P.lines.length} lijnen</span> <span class="chip">boekdatum ${dfmt(P.from)} – ${dfmt(P.to)}</span>${P.cc.length ? `<span class="chip">kostenplaats: ${esc(P.cc.join(', '))}</span>` : ''}</div>
+    <div class="cards imp-cards">
+      <div class="card"><span class="k">Kosten (6xxxxx)</span><span class="v">${eur2(sum(P.costs))}</span><span class="k">${P.costs.length} lijnen</span></div>
+      <div class="card"><span class="k">Kosten nieuw</span><span class="v">${R.cAdd.length}</span><span class="k">${eur2(sum(R.cAdd))}</span></div>
+      <div class="card"><span class="k">Al aanwezig</span><span class="v">${R.cSame.length + R.vSame.length}</span><span class="k">ongewijzigd, overgeslagen</span></div>
+      <div class="card ${R.cChg.length + R.vChg.length ? 'warnc' : ''}"><span class="k">Gewijzigd in Exact</span><span class="v">${R.cChg.length + R.vChg.length}</span></div>
+      <div class="card ${R.cDel.length + R.vDel.length ? 'badc' : ''}"><span class="k">Niet meer in Exact</span><span class="v">${R.cDel.length + R.vDel.length}</span></div>
+      <div class="card"><span class="k">Voorschotten (702000 · HUUR)</span><span class="v">${eur2(sum(P.vos))}</span><span class="k">${P.vos.length} lijnen · ${R.vAdd.length} nieuw</span></div>
+    </div>
+    ${unmapped.length ? `<div class="imp-map"><b class="imp-warn">Koppel deze huurders aan een organisatie:</b>${unmapped.map(n => `<label>${esc(n)} → <select class="imap" data-n="${esc(n)}"><option value="">– kies –</option>${opt(orgNames, '')}</select></label>`).join('')}</div>` : ''}
+    ${R.cChg.length ? `<h3>Gewijzigd in Exact (${R.cChg.length})</h3><div class="tscroll"><table class="imp-t"><thead><tr><th>Bijwerken</th><th>Boekstuk</th><th>Omschrijving</th><th class="num">Oud</th><th class="num">Nieuw</th></tr></thead><tbody>${R.cChg.map((x, i) => `<tr class="chg" data-i="${i}" data-k="cChg"><td><input type="checkbox" class="ion" ${x.on ? 'checked' : ''}></td><td class="mono">${esc(x.n.entry)}</td><td class="wrap">${esc(x.o.desc)}${x.o.desc !== x.n.desc ? '<br>→ ' + esc(x.n.desc) : ''}</td><td class="num mono">${eur2(Number(x.o.amount) || 0)}</td><td class="num mono">${eur2(x.n.amount)}</td></tr>`).join('')}</tbody></table></div><p class="empty" style="font-size:12px">Bij bijwerken veranderen enkel bedrag, omschrijving, leverancier en grootboek. Jouw categorie, sleutel en periode blijven.</p>` : ''}
+    ${R.cDel.length ? `<h3>Niet meer in Exact (${R.cDel.length})</h3><div class="tscroll"><table class="imp-t"><thead><tr><th>Verwijderen</th><th>Boekstuk</th><th>Omschrijving</th><th class="num">Bedrag</th></tr></thead><tbody>${R.cDel.map((x, i) => `<tr class="del" data-i="${i}" data-k="cDel"><td><input type="checkbox" class="ion" ${x.on ? 'checked' : ''}></td><td class="mono">${esc(x.o.entry)}</td><td class="wrap">${esc(x.o.desc)}</td><td class="num mono">${eur2(Number(x.o.amount) || 0)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${R.cAdd.length ? `<h3>Nieuwe kosten (${R.cAdd.length}) <span class="empty" style="font-size:12px;font-weight:400">– controleer categorie, sleutel en periode; vinkje uit = niet importeren</span></h3>
+      <div class="tscroll imp-scroll"><table class="imp-t"><thead><tr><th></th><th>Boekdatum / stuk</th><th>Omschrijving</th><th class="num">Bedrag</th><th>Categorie</th><th>Sleutel</th><th>Periode</th></tr></thead><tbody>${R.cAdd.map((c, i) => cRow(c, i, 'cAdd')).join('')}</tbody></table></div>` : ''}
+    ${P.vos.length ? `<h3>Voorschotten per organisatie (in dit bestand)</h3><ul class="mini imp-vo">${Object.entries(vByOrg).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<li><span>${esc(k)}</span><span class="mono">${eur2(v)}</span></li>`).join('')}</ul>` : ''}
+    ${infoRows ? `<details style="margin-top:10px"><summary>Niet geïmporteerd (ter info): huur, vorige afrekening, balansrekeningen</summary><ul class="mini" style="margin-top:6px">${infoRows}</ul></details>` : ''}
+    <div class="btns" style="margin-top:12px"><button class="btn primary" id="impGo">Opslaan in SharePoint</button><button class="btn" id="impX">Annuleren</button><span id="impMsg"></span></div>
+  </div>`;
+  const arr = k => k === 'cAdd' ? R.cAdd : k === 'cChg' ? R.cChg : R.cDel;
+  box.onchange = e => {
+    const t = e.target;
+    if (t.classList.contains('imap')) { if (t.value) { ORGMAP[t.dataset.n] = t.value; try { localStorage.setItem('lk.orgmap', JSON.stringify(ORGMAP)); } catch (er) {} [...P.vos].forEach(v => { if (v.rel === t.dataset.n) v.org = t.value; }); renderImport(); } return; }
+    const tr = t.closest('tr[data-k]'); if (!tr) return; const it = arr(tr.dataset.k)[+tr.dataset.i];
+    if (t.classList.contains('ion')) it.on = t.checked;
+    const c = it; if (tr.dataset.k !== 'cAdd') return;
+    if (t.classList.contains('icat')) { c.cat = t.value; c.key = t.value === 'Gas / verwarming' ? KEYS[1] : t.value === 'Elektriciteit eigen meter' || t.value === 'Huur / huurvermindering' ? KEYS[3] : KEYS[0]; renderImport(); }
+    if (t.classList.contains('ikey')) { c.key = t.value; if (c.key === KEYS[3] && !c.org) c.org = 'De Overmolen'; tr.querySelector('.iorg').hidden = c.key !== KEYS[3]; }
+    if (t.classList.contains('iorg')) c.org = t.value;
+    if (t.classList.contains('ifrom')) c.from = t.value;
+    if (t.classList.contains('ito')) c.to = t.value;
+  };
+  $('#impX').onclick = () => { IMP = null; renderImport(); };
+  $('#impGo').onclick = () => saveImport();
+}
+async function saveImport() {
+  const { file, P, R } = IMP, msg = $('#impMsg'), btn = $('#impGo');
+  if (P.vos.some(v => !v.org)) { msg.className = 'err'; msg.textContent = 'Koppel eerst alle huurders aan een organisatie.'; return; }
+  if (R.cAdd.some(c => c.on && c.from > c.to)) { msg.className = 'err'; msg.textContent = "Een periode heeft 'Tot' vóór 'Van'."; return; }
+  const ops = [];
+  for (const c of R.cAdd) if (c.on) { const o = { ...c }; delete o.on; delete o.psrc; delete o.warn; if (o.key !== KEYS[3]) o.org = ''; ops.push({ kind: 'costs', op: 'add', obj: o }); }
+  for (const x of R.cChg) if (x.on) ops.push({ kind: 'costs', op: 'upd', obj: { _id: x.o._id, amount: x.n.amount, desc: x.n.desc, supplier: x.n.supplier, gl: x.n.gl, entry: x.n.entry, bdate: x.n.bdate } });
+  for (const x of R.cDel) if (x.on) ops.push({ kind: 'costs', op: 'del', obj: { _id: x.o._id } });
+  for (const v of R.vAdd) ops.push({ kind: 'vo', op: 'add', obj: v });
+  for (const x of R.vChg) if (x.on) ops.push({ kind: 'vo', op: 'upd', obj: { _id: x.o._id, amount: x.n.amount, desc: x.n.desc, org: x.n.org, date: x.n.date } });
+  for (const x of R.vDel) if (x.on) ops.push({ kind: 'vo', op: 'del', obj: { _id: x.o._id } });
+  btn.disabled = true; msg.className = '';
+  try {
+    if (ops.length) await LK.batch(ops, (a, b) => { msg.textContent = `Opslaan… ${a}/${b}`; });
+    msg.textContent = 'Origineel bestand bewaren…';
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    let note = '';
+    try { await LK.uploadFile(`${window.LK_CONFIG.importFolder}/${stamp}_${file.name}`, file); note = 'Bestand: ' + window.LK_CONFIG.importFolder + '/' + stamp + '_' + file.name; } catch (er) { note = 'Bestand niet bewaard: ' + er.message; }
+    const n = k => ops.filter(o => o.op === k).length;
+    try { await LK.save('imp', { file: file.name, at: new Date().toLocaleString('nl-BE'), from: P.from, to: P.to, lines: P.lines.length, added: n('add'), changed: n('upd'), removed: n('del'), who: $('#who').textContent, note }); } catch (er) { note += ' · log niet bewaard: ' + er.message; }
+    await reload(); IMP = null; renderAll(true);
+    setStatus('live', `Import klaar: ${n('add')} nieuw · ${n('upd')} bijgewerkt · ${n('del')} verwijderd`);
+    const box = $('#afrImp'); box.hidden = false; box.innerHTML = `<div class="occbox"><b class="saved">✓ Import opgeslagen</b> – ${n('add')} nieuw · ${n('upd')} bijgewerkt · ${n('del')} verwijderd. <span class="empty">${esc(note)}</span> <button class="btn" id="impX">Sluiten</button></div>`;
+    $('#impX').onclick = () => { box.hidden = true; };
+  } catch (er) { btn.disabled = false; msg.className = 'err'; msg.textContent = 'Niet (volledig) opgeslagen: ' + (er.status === 403 ? 'geen bewerkrechten.' : er.message) + ' Herlaad en importeer opnieuw: wat al bewaard is wordt herkend.'; }
 }
 let raf = 0;
 function renderAll(keepPanel) {

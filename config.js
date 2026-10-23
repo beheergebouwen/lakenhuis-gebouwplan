@@ -7,6 +7,8 @@ window.LK_CONFIG = {
   planFolder: "Lakenhuis/Plannen",               // map in de documentbibliotheek van die site
   lists: {
     rooms: "LK_Ruimten", doors: "LK_Deuren", meters: "LK_IstaMeters",
-    orgs: "LK_Organisaties", settings: "LK_Instellingen", occ: "LK_Bezetting", costs: "LK_Kosten"
-  }
+    orgs: "LK_Organisaties", settings: "LK_Instellingen", occ: "LK_Bezetting", costs: "LK_Kosten",
+    vo: "LK_Voorschotten", imp: "LK_Imports"
+  },
+  importFolder: "Lakenhuis/Imports"                // map voor originele importbestanden (Exact)
 };

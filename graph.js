@@ -15,7 +15,9 @@
     doors:   { code: 'Title', floor: 'Verdieping', fr: 'Van', to: 'Naar', arch: 'CodeArchitect', type: 'DeurType', size: 'Maat', lock: 'SlotBadge', key: 'SleutelNr', checked: 'Gecontroleerd', note: 'Opmerking', oldCode: 'OudeCode' },
     meters:  { nr: 'Title', unit: 'IstaUnit', istaCode: 'IstaCode', istaRoom: 'IstaRuimte', old: 'OudeStand', new: 'NieuweStand', units: 'Verbruik', room: 'RuimteCode', note: 'Opmerking' },
     orgs:    { name: 'Title', color: 'Kleur', type: 'Soort' },
-    costs:   { desc: 'Title', cat: 'Categorie', from: 'Van', to: 'Tot', amount: 'Bedrag', key: 'Sleutel', org: 'Organisatie', supplier: 'Leverancier', invoice: 'Factuurnr', meter: 'Meter', note: 'Opmerking' },
+    costs:   { desc: 'Title', cat: 'Categorie', from: 'Van', to: 'Tot', amount: 'Bedrag', key: 'Sleutel', org: 'Organisatie', supplier: 'Leverancier', invoice: 'Factuurnr', meter: 'Meter', note: 'Opmerking', uid: 'Uid', entry: 'Boekstuk', bdate: 'Boekdatum', gl: 'Grootboek', src: 'Bron' },
+    vo:      { org: 'Title', date: 'Datum', amount: 'Bedrag', desc: 'Omschrijving', rel: 'Relatie', entry: 'Boekstuk', uid: 'Uid', src: 'Bron' },
+    imp:     { file: 'Title', at: 'Tijdstip', from: 'Van', to: 'Tot', lines: 'Lijnen', added: 'Nieuw', changed: 'Gewijzigd', removed: 'Verwijderd', who: 'Door', note: 'Opmerking' },
     occ:     { room: 'Title', org: 'Organisatie', from: 'Van', to: 'Tot', note: 'Opmerking' },
     settings:{ key: 'Title', period: 'Periode', heatCost: 'Verwarmingskost', totalUnits: 'EenhedenTotaal', rentTotal: 'HuurVerdelers', meterCount: 'AantalMeters' }
   };
@@ -42,10 +44,10 @@
     if (!r.ok) { let m = r.status + ''; try { m = (await r.json()).error.message; } catch (e) {} const err = new Error(m); err.status = r.status; throw err; }
     return r.status === 204 ? null : (r.headers.get('content-type') || '').includes('json') ? r.json() : r.blob();
   }
-  const DATES = { Van: 1, Tot: 1 };
+  const DK = { occ: { Van: 1, Tot: 1 }, costs: { Van: 1, Tot: 1 }, vo: { Datum: 1 } };
   const ymd = v => v ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels' }).format(new Date(v)) : '';
-  const toApp = (kind, f, id) => { const o = { _id: id }; for (const [a, s] of Object.entries(MAP[kind])) o[a] = (kind === 'occ' || kind === 'costs') && DATES[s] ? ymd(f[s]) : (f[s] ?? (typeof f[s] === 'boolean' ? false : '')); return o; };
-  const toSp = (kind, o) => { const f = {}; for (const [a, s] of Object.entries(MAP[kind])) if (a in o) f[s] = (kind === 'occ' || kind === 'costs') && DATES[s] ? (o[a] ? o[a] + 'T12:00:00Z' : null) : (o[a] === '' && /M2|Verbruik|Stand|kost|Eenheden|Huur|Aantal|Bedrag/.test(s) ? null : o[a]); return f; };
+  const toApp = (kind, f, id) => { const o = { _id: id }; for (const [a, s] of Object.entries(MAP[kind])) o[a] = DK[kind]?.[s] ? ymd(f[s]) : (f[s] ?? (typeof f[s] === 'boolean' ? false : '')); return o; };
+  const toSp = (kind, o) => { const f = {}; for (const [a, s] of Object.entries(MAP[kind])) if (a in o) f[s] = DK[kind]?.[s] ? (o[a] ? o[a] + 'T12:00:00Z' : null) : (o[a] === '' && /M2|Verbruik|Stand|kost|Eenheden|Huur|Aantal|Bedrag|Lijnen|Nieuw|Gewijzigd|Verwijderd/.test(s) ? null : o[a]); return f; };
 
   const API = {
     async login() {
@@ -94,6 +96,21 @@
       }
     },
     async upload(file, blob) { return g(`/sites/${siteId}/drive/root:/${C.planFolder}/${file}:/content`, { method: 'PUT', body: blob, headers: { 'Content-Type': 'image/jpeg' } }); },
+    async uploadFile(path, blob) { return g(`/sites/${siteId}/drive/root:/${path.split('/').map(encodeURIComponent).join('/')}:/content`, { method: 'PUT', body: blob, headers: { 'Content-Type': blob.type || 'application/octet-stream' } }); },
+    async batch(ops, onStep) {               // ops: [{kind, op:'add'|'upd'|'del', obj}]
+      const out = [];
+      for (let i = 0; i < ops.length; i += 20) {
+        const part = ops.slice(i, i + 20), reqs = [];
+        for (let k = 0; k < part.length; k++) { const { kind, op, obj } = part[k], lid = await this.listId(kind), base = `/sites/${siteId}/lists/${lid}/items`;
+          reqs.push(op === 'add' ? { id: String(k + 1), method: 'POST', url: base, headers: { 'Content-Type': 'application/json' }, body: { fields: toSp(kind, obj) } }
+            : op === 'upd' ? { id: String(k + 1), method: 'PATCH', url: `${base}/${obj._id}/fields`, headers: { 'Content-Type': 'application/json' }, body: toSp(kind, obj) }
+            : { id: String(k + 1), method: 'DELETE', url: `${base}/${obj._id}` }); }
+        const r = await g('/$batch', { method: 'POST', body: JSON.stringify({ requests: reqs }) });
+        const bad = r.responses.filter(x => x.status >= 300); if (bad.length) throw new Error((bad[0].body?.error?.message || bad[0].status) + ` (${bad.length} fout)`);
+        out.push(...r.responses); onStep && onStep(Math.min(i + 20, ops.length), ops.length);
+      }
+      return out;
+    },
     logout() { msal.logoutRedirect({ account }); },
     get siteId() { return siteId; }
   };

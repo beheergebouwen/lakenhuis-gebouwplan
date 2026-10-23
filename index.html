@@ -163,7 +163,19 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 .occconf { margin-left: auto; font-weight: 400; font-size: 12px; color: var(--bad) }
 .occconf .btn { padding: 1px 8px; font-size: 12px }
 #cMsg.saved { color: var(--ok, #1b7f3b) } #cMsg.err { color: var(--bad) }
-@media print { body.print-afr header.top, body.print-afr #afrNew, body.print-afr .tablebar button, body.print-afr .cdel, body.print-afr footer, body.print-afr section.view:not(#v-afr) { display: none !important } body.print-afr #v-afr { display: block !important } }
+#afrImp { margin-bottom: 12px }
+.imp h3 { font-size: 15px; margin: 14px 0 6px }
+.imp-head { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px }
+.imp-cards .card .v { font-size: 20px }
+.card.warnc { border-color: var(--warn) } .card.badc { border-color: var(--bad) }
+.imp-warn { color: var(--warn); font-size: 12px; font-weight: 600 }
+.imp-map { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 8px 0; font-size: 13px }
+.imp-scroll { max-height: 60vh; overflow: auto }
+.imp-t td, .imp-t th { vertical-align: top }
+.imp-t select, .imp-t input[type=date] { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); max-width: 190px }
+.imp-t tr.chg td { background: #fff8e1 } .imp-t tr.del td { background: #fdecea }
+.imp-vo { max-width: 460px }
+@media print { body.print-afr header.top, body.print-afr #afrNew, body.print-afr #afrImp, body.print-afr #afrLog, body.print-afr .tablebar button, body.print-afr .cdel, body.print-afr footer, body.print-afr section.view:not(#v-afr) { display: none !important } body.print-afr #v-afr { display: block !important } }
 </style>
 </head>
 <body>
@@ -244,10 +256,16 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
   <div class="tablebar"><h2>Afrekening</h2>
     <label>Van <input type="date" id="aFrom"></label><label>Tot <input type="date" id="aTo"></label>
     <button class="btn" id="aIsta">Ista-periode</button><button class="btn" id="aYear">Kalenderjaar</button>
+    <button class="btn" id="aImp">Importeer Exact (CSV)</button><input type="file" id="aImpFile" accept=".csv,.txt,text/csv" hidden>
     <button class="btn" id="aExp">Exporteer (CSV)</button><button class="btn" id="aPrint">Afdrukken / PDF</button></div>
+  <p class="empty" id="afrLog" style="font-size:12px;margin:-4px 0 8px"></p>
+  <div id="afrImp" hidden></div>
   <div class="cards" id="afrCards"></div>
   <div class="orgnew" id="afrNew"></div>
   <div class="tscroll"><table id="tAfr"></table></div>
+  <h3 style="margin:18px 0 6px">Saldo per organisatie</h3>
+  <p class="empty" style="font-size:12px;margin:0 0 6px">Aandeel kosten in de periode min de voorschotten (Exact, rekening 702000, dagboek HUUR) met boekdatum in de periode.</p>
+  <div class="tscroll"><table id="tSaldo"></table></div>
   <p class="empty" style="font-size:12px;margin-top:8px">Sleutels: <b>m² × dagen</b> = verhuurbare m² per dag bezetting (niet-bezette m² → De Overmolen) · <b>Ista-verbruik</b> = verbruik van de gekoppelde Ista-meters × dagen · <b>Gelijke delen</b> = gelijk over de huurders, naar rato van hun aanwezigheid · <b>Rechtstreeks</b> = volledig aan één organisatie (bv. eigen elektriciteitsmeter).</p>
 </section>
 
@@ -265,8 +283,8 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=12"></script>
-<script src="graph.js?v=12"></script>
-<script src="app.js?v=12"></script>
+<script src="config.js?v=13"></script>
+<script src="graph.js?v=13"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>
