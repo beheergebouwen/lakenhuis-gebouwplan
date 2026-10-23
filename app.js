@@ -77,8 +77,8 @@ async function save(col, id, body) {
 
 // ---------- derived
 const m2 = r => (r.m2meas != null && r.m2meas !== '') ? Number(r.m2meas) : (r.m2plan != null ? Number(r.m2plan) : null);
-const price = () => S.settings.heatCost / S.settings.totalUnits;
-const rent = () => S.settings.rentTotal / S.settings.meterCount;
+const price = () => S.settings.totalUnits ? S.settings.heatCost / S.settings.totalUnits : 0;
+const rent = () => S.settings.meterCount ? S.settings.rentTotal / S.settings.meterCount : 0;
 const meterCost = m => (Number(m.units) || 0) * price() + rent();
 function metersOf(code) { return Object.values(S.meters).filter(m => m.room === code); }
 function roomOf(code) { return S.rooms[code]; }
