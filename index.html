@@ -246,7 +246,7 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 <section class="view" id="v-occ" hidden>
   <div class="tablebar"><h2>Bezetting</h2>
     <label>Van <input type="date" id="bFrom"></label><label>Tot <input type="date" id="bTo"></label>
-    <button class="btn" id="bIsta">Ista-periode</button><button class="btn" id="bYear">Kalenderjaar</button>
+    <label>Kalenderjaar <select id="bYear" aria-label="Kalenderjaar"></select></label>
     <select id="bOrg" aria-label="Organisatie"></select><select id="bFloor" aria-label="Verdieping"></select>
     <button class="btn" id="bExp">Exporteer (CSV)</button></div>
   <div class="cards" id="occCards"></div>
@@ -257,7 +257,7 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 <section class="view" id="v-afr" hidden>
   <div class="tablebar"><h2>Afrekening</h2>
     <label>Van <input type="date" id="aFrom"></label><label>Tot <input type="date" id="aTo"></label>
-    <button class="btn" id="aIsta">Ista-periode</button><button class="btn" id="aYear">Kalenderjaar</button>
+    <label>Kalenderjaar <select id="aYear" aria-label="Kalenderjaar"></select></label>
     <label>Simulatie <select id="aSim" aria-label="Simulatie sleutel"></select></label>
     <button class="btn" id="aImp">Importeer Exact (CSV)</button><input type="file" id="aImpFile" accept=".csv,.txt,text/csv" hidden>
     <button class="btn" id="aExp">Exporteer (CSV)</button><button class="btn" id="aPrint">Afdrukken / PDF</button></div>
@@ -276,7 +276,7 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 <section class="view" id="v-orgs" hidden>
   <div class="tablebar"><h2>Organisaties</h2>
     <label>Van <input type="date" id="pFrom"></label><label>Tot <input type="date" id="pTo"></label>
-    <button class="btn" id="pIsta">Ista-periode</button><button class="btn" id="pYear">Kalenderjaar</button>
+    <label>Kalenderjaar <select id="pYear" aria-label="Kalenderjaar"></select></label>
     <span class="chip">m²: gemeten, anders plan</span><button class="btn" id="expOcc">Bezetting exporteren (CSV)</button></div>
   <div class="cards" id="orgCards"></div>
   <div class="orgnew" id="orgNew"></div>
@@ -287,8 +287,8 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=16"></script>
-<script src="graph.js?v=16"></script>
-<script src="app.js?v=16"></script>
+<script src="config.js?v=17"></script>
+<script src="graph.js?v=17"></script>
+<script src="app.js?v=17"></script>
 </body>
 </html>

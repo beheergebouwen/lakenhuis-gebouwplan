@@ -64,7 +64,7 @@ async function reload(first) {
   ORGS = (orgs || []).filter(o => o.name).map(o => ({ _id: o._id, name: o.name, color: o.color || '#e6e2d6', type: o.type || 'Huurder' })).sort((a, b) => a.name.localeCompare(b.name));
   S.settings = (settings || []).find(x => x.key === 'ista') || S.settings;
   for (const k of ['heatCost', 'totalUnits', 'rentTotal', 'meterCount']) S.settings[k] = Number(S.settings[k]) || 0;
-  if (!per) per = istaPeriod();
+  if (!per) { const y = +peil.slice(0, 4) - 1; per = { from: y + '-01-01', to: y + '-12-31' }; }   // standaard: vorig kalenderjaar
   if (!first) setStatus('live', 'Verbonden met SharePoint · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }));
 }
 async function save(col, id, body) {
@@ -102,8 +102,7 @@ function buildStatic() {
   $('#pFrom').value = per.from; $('#pTo').value = per.to;
   const setPer = () => setPeriod($('#pFrom').value, $('#pTo').value);
   $('#pFrom').onchange = setPer; $('#pTo').onchange = setPer;
-  $('#pIsta').onclick = () => { const I = istaPeriod(); setPeriod(I.from, I.to); };
-  $('#pYear').onclick = () => { const y = peil.slice(0, 4); setPeriod(y + '-01-01', y + '-12-31'); };
+  yearSel('#pYear');
   $('#expOcc').onclick = () => exportCsv('Lakenhuis_bezetting.csv', ['ruimtecode', 'ruimte', 'organisatie', 'van', 'tot', 'opmerking'],
     [...OCC].sort((a, b) => a.room.localeCompare(b.room) || (a.from || '').localeCompare(b.from || '')).map(o => [o.room, roomOf(o.room)?.name || '', o.org, dfmt(o.from) || 'onbekend', dfmt(o.to) || 'lopend', o.note]));
   $('#tabs').onclick = e => { const b = e.target.closest('button'); if (!b) return; showView(b.dataset.v); };
@@ -359,16 +358,19 @@ function renderOrgs() {
     `</tbody><tfoot><tr><th>Leegstand</th><th></th><th></th><th class="num mono">${m2f(vacant)}</th><th class="mono" style="font-size:12px">${privTot ? (vacant / privTot * 100).toFixed(2) : 0}%</th><th></th><th></th><th></th></tr></tfoot>`;
 }
 // ---------- bezetting per periode (tijdlijn + tabel)
+// jaarkeuze (kalenderjaar) in Organisaties, Bezetting en Afrekening
+function yearSel(id) { const el = $(id); if (!el) return; const y0 = +peil.slice(0, 4); el.innerHTML = '<option value="">anders</option>' + [y0 + 1, y0, y0 - 1, y0 - 2, y0 - 3].map(y => `<option>${y}</option>`).join(''); el.onchange = () => { if (el.value) setPeriod(el.value + '-01-01', el.value + '-12-31'); }; syncYears(); }
+function syncYears() { const y = per && per.from.slice(5) === '01-01' && per.to.slice(5) === '12-31' && per.from.slice(0, 4) === per.to.slice(0, 4) ? per.from.slice(0, 4) : ''; ['#pYear', '#bYear', '#aYear'].forEach(i => { if ($(i)) $(i).value = y; }); }
 function setPeriod(a, b) {
   if (!a || !b || a > b) return; per = { from: a, to: b };
   for (const [f, t] of [['#pFrom', '#pTo'], ['#bFrom', '#bTo'], ['#aFrom', '#aTo']]) { if ($(f)) { $(f).value = a; $(t).value = b; } }
+  syncYears();
   renderOrgs(); renderOcc(); renderAfr();
 }
 function bindOcc() {
   if (bindOcc.done) return; bindOcc.done = true;
   $('#bFrom').onchange = $('#bTo').onchange = () => setPeriod($('#bFrom').value, $('#bTo').value);
-  $('#bIsta').onclick = () => { const I = istaPeriod(); setPeriod(I.from, I.to); };
-  $('#bYear').onclick = () => { const y = peil.slice(0, 4); setPeriod(y + '-01-01', y + '-12-31'); };
+  yearSel('#bYear');
   ['#bOrg', '#bFloor'].forEach(x => $(x).oninput = renderOcc);
   $('#bExp').onclick = () => { const rows = occRows(); exportCsv('Lakenhuis_bezetting_' + per.from + '_' + per.to + '.csv', ['ruimtecode', 'ruimte', 'verdieping', 'organisatie', 'van', 'tot', 'dagen_in_periode', 'm2', 'm2_dagen', 'gemiddelde_m2_periode'],
     rows.map(x => [x.r.code, x.r.name, floorLabel(x.r.floor), x.o.org, dfmt(x.o.from) || 'onbekend', dfmt(x.o.to) || 'lopend', x.days, x.m2 ?? '', (x.m2 * x.days || 0).toFixed(1), x.m2 != null ? (x.m2 * x.days / x.P).toFixed(2) : ''])); };
@@ -484,10 +486,9 @@ function costsInPeriod() { return COSTS.filter(c => (!c.to || c.to >= per.from) 
 function bindAfr() {
   if (bindAfr.done) return; bindAfr.done = true;
   $('#aFrom').onchange = $('#aTo').onchange = () => setPeriod($('#aFrom').value, $('#aTo').value);
-  $('#aIsta').onclick = () => { const I = istaPeriod(); setPeriod(I.from, I.to); };
   $('#aSim').innerHTML = '<option value="">Sleutel per kostenlijn</option>' + KEYS.filter(k => k !== KEYS[3]).map(k => `<option>${esc(k)}</option>`).join('');
   $('#aSim').onchange = () => { SIMKEY = $('#aSim').value; PSC = {}; renderAfr(); };
-  $('#aYear').onclick = () => { const y = peil.slice(0, 4); setPeriod(y + '-01-01', y + '-12-31'); };
+  yearSel('#aYear');
   $('#aPrint').onclick = () => { document.body.classList.add('print-afr'); window.print(); setTimeout(() => document.body.classList.remove('print-afr'), 500); };
   $('#aExp').onclick = () => { PSC = {}; const cs = costsInPeriod(), orgs = afrOrgs(cs);
     exportCsv('Lakenhuis_afrekening_' + per.from + '_' + per.to + '.csv', ['categorie', 'omschrijving', 'leverancier', 'factuur', 'meter', 'van', 'tot', 'bedrag', 'sleutel', ...orgs],
