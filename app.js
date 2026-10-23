@@ -416,14 +416,40 @@ function renderOcc() {
 }
 // ---------- afrekening: kostenposten + verdeelsleutels
 const CATS = ['Water (algemene meter)', 'Elektriciteit algemeen', 'Elektriciteit eigen meter', 'Gas / verwarming', 'Schoonmaak', 'Herstelling / onderhoud', 'Lift', 'Keuringen / brandveiligheid', 'Verzekering', 'Afval', 'Telefoon / internet', 'Huur / huurvermindering', 'Andere'];
-const KEYS = ['m² × dagen bezetting', 'Ista-verbruik', 'Gelijke delen (huurders)', 'Rechtstreeks aan één organisatie'];
+const KEYS = ['m² × dagen bezetting', 'Ista-verbruik', 'Gelijke delen (huurders)', 'Rechtstreeks aan één organisatie', 'Eigen m² + gemeensch. naar aanwezigen (m²)', 'Eigen m² + gemeensch. naar aanwezigen (gelijk)'];
+// gemeenschappelijk deel: per dag verdeeld over wie die dag een verhuurbare ruimte gebruikt (naar m² of gelijk); niemand aanwezig → De Overmolen
+let PSC = {};
+function orgOnDay(r, day) { const rows = occOf(r.code); if (!rows.length) return r.org || ''; const o = rows.find(o => isOpen(o, day)); return o ? o.org : ''; }
+function presentShares(A, B, equal) {
+  const ck = A + B + equal; if (PSC[ck]) return PSC[ck];
+  const out = {}, priv = Object.values(S.rooms).filter(r => r.use === 'Verhuurbaar');
+  for (let d = dnum(A); d <= dnum(B); d++) {
+    const day = new Date(d * 864e5).toISOString().slice(0, 10), w = {};
+    for (const r of priv) { const o = orgOnDay(r, day); if (o) w[o] = equal ? 1 : (w[o] || 0) + (m2(r) || 0); }
+    const T = Object.values(w).reduce((a, b) => a + b, 0);
+    if (T > 0) for (const [o, v] of Object.entries(w)) out[o] = (out[o] || 0) + v / T; else out['De Overmolen'] = (out['De Overmolen'] || 0) + 1;
+  }
+  return (PSC[ck] = out);   // som = aantal dagen
+}
 const eur2 = n => (Math.round(n * 100) / 100).toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' });
 function weights(key, A, B, org) {
   const P = dnum(B) - dnum(A) + 1, w = {};
   if (key === KEYS[3]) { if (org) w[org] = 1; return w; }
-  if (key === KEYS[1]) {
-    for (const m of Object.values(S.meters)) { const r = roomOf(m.room); if (!r) continue; for (const [o, d] of Object.entries(orgDays(r, A, B))) w[o] = (w[o] || 0) + (Number(m.units) || 0) * d / P; }
+  if (key === KEYS[1]) {   // meter in ruimte van een organisatie → die organisatie; leeg → De Overmolen; gemeenschappelijke ruimte → aanwezigen
+    for (const m of Object.values(S.meters)) {
+      const r = roomOf(m.room), u = Number(m.units) || 0; if (!r || !u) continue;
+      if (r.use === 'Verhuurbaar') { let used = 0; for (const [o, d] of Object.entries(orgDays(r, A, B))) { w[o] = (w[o] || 0) + u * d / P; used += d; } if (used < P) w['De Overmolen'] = (w['De Overmolen'] || 0) + u * (P - used) / P; }
+      else for (const [o, s] of Object.entries(presentShares(A, B, false))) w[o] = (w[o] || 0) + u * s / P;
+    }
     if (Object.values(w).reduce((a, b) => a + b, 0) > 0) return w;
+  }
+  if (key === KEYS[4] || key === KEYS[5]) {   // eigen m² (leegstand → De Overmolen) + gemeenschappelijke m² naar aanwezigen
+    const priv = Object.values(S.rooms).filter(r => r.use === 'Verhuurbaar'), comm = Object.values(S.rooms).filter(r => r.use === 'Gemeenschappelijk');
+    const Vm = priv.reduce((a, r) => a + (m2(r) || 0), 0), Gm = comm.reduce((a, r) => a + (m2(r) || 0), 0), pf = Vm + Gm ? Vm / (Vm + Gm) : 1;
+    let used = 0; for (const r of priv) for (const [o, d] of Object.entries(orgDays(r, A, B))) { const v = (m2(r) || 0) * d; w[o] = (w[o] || 0) + pf * v / (Vm * P || 1); used += v; }
+    if (Vm * P > used) w['De Overmolen'] = (w['De Overmolen'] || 0) + pf * (Vm * P - used) / (Vm * P);
+    for (const [o, s] of Object.entries(presentShares(A, B, key === KEYS[5]))) w[o] = (w[o] || 0) + (1 - pf) * s / P;
+    return w;
   }
   if (key === KEYS[2]) {
     const huur = new Set(ORGS.filter(o => o.type !== 'Eigenaar').map(o => o.name));
@@ -455,13 +481,13 @@ function bindAfr() {
   $('#aIsta').onclick = () => { const I = istaPeriod(); setPeriod(I.from, I.to); };
   $('#aYear').onclick = () => { const y = peil.slice(0, 4); setPeriod(y + '-01-01', y + '-12-31'); };
   $('#aPrint').onclick = () => { document.body.classList.add('print-afr'); window.print(); setTimeout(() => document.body.classList.remove('print-afr'), 500); };
-  $('#aExp').onclick = () => { const cs = costsInPeriod(), orgs = afrOrgs(cs);
+  $('#aExp').onclick = () => { PSC = {}; const cs = costsInPeriod(), orgs = afrOrgs(cs);
     exportCsv('Lakenhuis_afrekening_' + per.from + '_' + per.to + '.csv', ['categorie', 'omschrijving', 'leverancier', 'factuur', 'meter', 'van', 'tot', 'bedrag', 'sleutel', ...orgs],
       cs.map(c => { const sp = split(c); return [c.cat, c.desc, c.supplier, c.invoice || c.entry, c.meter, dfmt(c.from), dfmt(c.to), amtIn(c).toFixed(2), c.key + (c.org ? ' (' + c.org + ')' : ''), ...orgs.map(o => (sp[o] || 0).toFixed(2))]; })); };
 }
 function afrOrgs(cs) { const set = new Set(); cs.forEach(c => Object.keys(split(c)).forEach(o => set.add(o))); return [...ORGS.map(o => o.name).filter(n => set.has(n)), ...[...set].filter(n => !ORGS.some(o => o.name === n))]; }
 function renderAfr() {
-  if (!per || !$('#v-afr')) return; bindAfr(); bindImport();
+  if (!per || !$('#v-afr')) return; bindAfr(); bindImport(); PSC = {};
   const li = IMPS.slice().sort((a, b) => (b._id | 0) - (a._id | 0))[0];
   $('#afrLog').innerHTML = li ? `Laatste import: <b>${esc(li.file)}</b> op ${esc(li.at)} (boekdatum ${dfmt(li.from)} – ${dfmt(li.to)}, ${li.added || 0} nieuw, ${li.changed || 0} bijgewerkt, ${li.removed || 0} verwijderd) · ${IMPS.length} import(s) in totaal` : 'Nog geen import uit Exact.';
   $('#aFrom').value = per.from; $('#aTo').value = per.to;
