@@ -416,17 +416,18 @@ function renderOcc() {
 }
 // ---------- afrekening: kostenposten + verdeelsleutels
 const CATS = ['Water (algemene meter)', 'Elektriciteit algemeen', 'Elektriciteit eigen meter', 'Gas / verwarming', 'Schoonmaak', 'Herstelling / onderhoud', 'Lift', 'Keuringen / brandveiligheid', 'Verzekering', 'Afval', 'Telefoon / internet', 'Huur / huurvermindering', 'Andere'];
-const KEYS = ['m² × dagen bezetting', 'Ista-verbruik', 'Gelijke delen (huurders)', 'Rechtstreeks aan één organisatie', 'Eigen m² + gemeensch. naar aanwezigen (m²)', 'Eigen m² + gemeensch. naar aanwezigen (gelijk)'];
+const KEYS = ['m² × dagen bezetting', 'Ista-verbruik', 'Gelijke delen (huurders)', 'Rechtstreeks aan één organisatie', 'Eigen m² + gemeensch. naar aanwezigen (m²)', 'Eigen m² + gemeensch. naar aanwezigen (gelijk)', 'Bezette m² (leegstand niet aangerekend)'];
+const KDEF = KEYS[6];   // standaardsleutel voor huurlasten
 // gemeenschappelijk deel: per dag verdeeld over wie die dag een verhuurbare ruimte gebruikt (naar m² of gelijk); niemand aanwezig → De Overmolen
 let PSC = {}, SIMKEY = '';
-const keyOf = c => SIMKEY && c.key !== KEYS[3] ? SIMKEY : (c.key || KEYS[0]);
+const keyOf = c => SIMKEY && c.key !== KEYS[3] ? SIMKEY : (c.key || KDEF);
 function orgOnDay(r, day) { const rows = occOf(r.code); if (!rows.length) return r.org || ''; const o = rows.find(o => isOpen(o, day)); return o ? o.org : ''; }
-function presentShares(A, B, equal) {
-  const ck = A + B + equal; if (PSC[ck]) return PSC[ck];
+function presentShares(A, B, equal, noOvm) {
+  const ck = A + B + equal + !!noOvm; if (PSC[ck]) return PSC[ck];
   const out = {}, priv = Object.values(S.rooms).filter(r => r.use === 'Verhuurbaar');
   for (let d = dnum(A); d <= dnum(B); d++) {
     const day = new Date(d * 864e5).toISOString().slice(0, 10), w = {};
-    for (const r of priv) { const o = orgOnDay(r, day); if (o) w[o] = equal ? 1 : (w[o] || 0) + (m2(r) || 0); }
+    for (const r of priv) { const o = orgOnDay(r, day); if (o && !(noOvm && o === 'De Overmolen')) w[o] = equal ? 1 : (w[o] || 0) + (m2(r) || 0); }
     const T = Object.values(w).reduce((a, b) => a + b, 0);
     if (T > 0) for (const [o, v] of Object.entries(w)) out[o] = (out[o] || 0) + v / T; else out['De Overmolen'] = (out['De Overmolen'] || 0) + 1;
   }
@@ -443,6 +444,10 @@ function weights(key, A, B, org) {
       else for (const [o, s] of Object.entries(presentShares(A, B, false))) w[o] = (w[o] || 0) + u * s / P;
     }
     if (Object.values(w).reduce((a, b) => a + b, 0) > 0) return w;
+  }
+  if (key === KEYS[6] || key === KEYS[1]) {   // bezette m²: alles over wie er die dag is (naar m²); ruimten op naam van De Overmolen / leegstand betalen niets. Ook terugval voor Ista zonder gekoppelde meters
+    for (const [o, s] of Object.entries(presentShares(A, B, false, true))) w[o] = (w[o] || 0) + s;
+    return w;
   }
   if (key === KEYS[4] || key === KEYS[5]) {   // eigen m² (leegstand → De Overmolen) + gemeenschappelijke m² naar aanwezigen
     const priv = Object.values(S.rooms).filter(r => r.use === 'Verhuurbaar'), comm = Object.values(S.rooms).filter(r => r.use === 'Gemeenschappelijk');
@@ -500,13 +505,13 @@ function renderAfr() {
     <input id="cDesc" placeholder="Omschrijving (bv. Sibelga factuur Q1)" style="flex:2 1 200px" aria-label="Omschrijving">
     <input id="cAmt" placeholder="Bedrag €" inputmode="decimal" style="width:110px" aria-label="Bedrag">
     <label>Van <input type="date" id="cFrom" value="${per.from}"></label><label>Tot <input type="date" id="cTo" value="${per.to}"></label>
-    <select id="cKey" aria-label="Verdeelsleutel">${KEYS.map(k => `<option>${k}</option>`).join('')}</select>
+    <select id="cKey" aria-label="Verdeelsleutel">${KEYS.map(k => `<option${k === KDEF ? ' selected' : ''}>${k}</option>`).join('')}</select>
     <select id="cOrg" aria-label="Organisatie" hidden>${ORGS.map(o => `<option>${esc(o.name)}</option>`).join('')}</select>
     <input id="cSup" placeholder="Leverancier" style="width:140px" aria-label="Leverancier"><input id="cInv" placeholder="Factuurnr" style="width:110px" aria-label="Factuurnummer"><input id="cMeter" placeholder="Meter / EAN" style="width:120px" aria-label="Meter">
     <button class="btn primary" id="cAdd">Toevoegen</button><span id="cMsg"></span>` : '';
   if (dis) {
     const sync = () => { $('#cOrg').hidden = $('#cKey').value !== KEYS[3]; };
-    $('#cCat').onchange = () => { const v = $('#cCat').value; $('#cKey').value = v === 'Gas / verwarming' ? KEYS[1] : v === 'Elektriciteit eigen meter' ? KEYS[3] : KEYS[0]; sync(); };
+    $('#cCat').onchange = () => { const v = $('#cCat').value; $('#cKey').value = v === 'Gas / verwarming' ? KEYS[1] : v === 'Elektriciteit eigen meter' ? KEYS[3] : KDEF; sync(); };
     $('#cKey').onchange = sync;
     $('#cAdd').onclick = async () => {
       const msg = $('#cMsg'), amt = Number(String($('#cAmt').value).replace(/\s/g, '').replace(',', '.'));
@@ -531,7 +536,7 @@ function renderAfr() {
     `</tbody><tfoot><tr><th>Totaal</th><th class="num mono">${eur2(Object.values(tot).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(Object.values(vo).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(sorgs.reduce((a, o) => a + saldo(o), 0))}</th><th></th></tr></tfoot>` : '';
   $('#tAfr').innerHTML = cs.length ? `<thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Sleutel</th>${orgs.map(o => `<th class="num"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</th>`).join('')}<th></th></tr></thead><tbody>` +
     cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td>${canWrite ? `<select class="ce" data-f="cat">${[...new Set([...CATS, c.cat || ''])].filter(Boolean).map(x => `<option${x === c.cat ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : esc(c.cat)}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.entry && 'boekstuk ' + c.entry, c.gl, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}</td>
-      <td class="mono" style="font-size:12px;white-space:nowrap">${canWrite ? `<input type="date" class="ce" data-f="from" value="${c.from || ''}"><br><input type="date" class="ce" data-f="to" value="${c.to || ''}">` : dfmt(c.from) + '<br>' + dfmt(c.to)}</td><td class="num mono">${eur2(amtIn(c))}${ovl(c).f < 0.9999 ? `<br><span class="empty" style="font-size:10px">${Math.round(ovl(c).f * 100)}% van ${eur2(Number(c.amount) || 0)}</span>` : ''}</td><td style="font-size:12px">${canWrite ? `<select class="ce" data-f="key">${KEYS.map(k => `<option${k === (c.key || KEYS[0]) ? ' selected' : ''}>${esc(k)}</option>`).join('')}</select>${c.key === KEYS[3] ? `<br><select class="ce" data-f="org">${ORGS.map(o => `<option${o.name === c.org ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select>` : ''}` : esc(c.key) + (c.org ? '<br><b>' + esc(c.org) + '</b>' : '')}${SIMKEY && c.key !== KEYS[3] ? '<br><span class="imp-warn">simulatie: ' + esc(SIMKEY) + '</span>' : ''}</td>
+      <td class="mono" style="font-size:12px;white-space:nowrap">${canWrite ? `<input type="date" class="ce" data-f="from" value="${c.from || ''}"><br><input type="date" class="ce" data-f="to" value="${c.to || ''}">` : dfmt(c.from) + '<br>' + dfmt(c.to)}</td><td class="num mono">${eur2(amtIn(c))}${ovl(c).f < 0.9999 ? `<br><span class="empty" style="font-size:10px">${Math.round(ovl(c).f * 100)}% van ${eur2(Number(c.amount) || 0)}</span>` : ''}</td><td style="font-size:12px">${canWrite ? `<select class="ce" data-f="key">${KEYS.map(k => `<option${k === (c.key || KDEF) ? ' selected' : ''}>${esc(k)}</option>`).join('')}</select>${c.key === KEYS[3] ? `<br><select class="ce" data-f="org">${ORGS.map(o => `<option${o.name === c.org ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select>` : ''}` : esc(c.key) + (c.org ? '<br><b>' + esc(c.org) + '</b>' : '')}${SIMKEY && c.key !== KEYS[3] ? '<br><span class="imp-warn">simulatie: ' + esc(SIMKEY) + '</span>' : ''}</td>
       ${orgs.map(o => `<td class="num mono">${sp[o] ? eur2(sp[o]) : '–'}</td>`).join('')}<td>${canWrite ? '<button class="occdel cdel" title="Verwijderen">✕</button>' : ''}</td></tr>`; }).join('') +
     `</tbody><tfoot><tr><th colspan="3">Totaal</th><th class="num mono">${eur2(total)}</th><th></th>${orgs.map(o => `<th class="num mono">${eur2(tot[o] || 0)}</th>`).join('')}<th></th></tr></tfoot>` : '<tbody><tr><td class="empty">Nog geen kostenposten in deze periode. Voeg ze hierboven toe.</td></tr></tbody>';
   $('#tAfr').onchange = async e => {
@@ -600,7 +605,7 @@ function periodOf(desc, date) {
   return [isoD(y, mo, 1), isoD(y, mo, lastDay(y, mo)), 'maand van boekdatum'];
 }
 function catKey(gl, desc, rel) {
-  const d = (desc + ' ' + rel).toLowerCase(); let cat = 'Andere', key = KEYS[0], org = '', warn = '';
+  const d = (desc + ' ' + rel).toLowerCase(); let cat = 'Andere', key = KDEF, org = '', warn = '';
   if (/hovenier|passerstr|sint-joris|cellebroers/.test(desc.toLowerCase())) return { cat: 'Andere', key: KEYS[3], org: 'De Overmolen', warn: 'Andere locatie? → De Overmolen' };
   switch (gl.slice(0, 4)) {
     case '6101': cat = 'Schoonmaak'; break;
@@ -710,7 +715,7 @@ function renderImport() {
     const tr = t.closest('tr[data-k]'); if (!tr) return; const it = arr(tr.dataset.k)[+tr.dataset.i];
     if (t.classList.contains('ion')) it.on = t.checked;
     const c = it; if (tr.dataset.k !== 'cAdd') return;
-    if (t.classList.contains('icat')) { c.cat = t.value; c.key = t.value === 'Gas / verwarming' ? KEYS[1] : t.value === 'Elektriciteit eigen meter' || t.value === 'Huur / huurvermindering' ? KEYS[3] : KEYS[0]; renderImport(); }
+    if (t.classList.contains('icat')) { c.cat = t.value; c.key = t.value === 'Gas / verwarming' ? KEYS[1] : t.value === 'Elektriciteit eigen meter' || t.value === 'Huur / huurvermindering' ? KEYS[3] : KDEF; renderImport(); }
     if (t.classList.contains('ikey')) { c.key = t.value; if (c.key === KEYS[3] && !c.org) c.org = 'De Overmolen'; tr.querySelector('.iorg').hidden = c.key !== KEYS[3]; }
     if (t.classList.contains('iorg')) c.org = t.value;
     if (t.classList.contains('ifrom')) c.from = t.value;

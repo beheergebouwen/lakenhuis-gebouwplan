@@ -270,7 +270,7 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
   <h3 style="margin:18px 0 6px">Saldo per organisatie</h3>
   <p class="empty" style="font-size:12px;margin:0 0 6px">Aandeel kosten in de periode min de voorschotten (Exact, rekening 702000, dagboek HUUR) met boekdatum in de periode.</p>
   <div class="tscroll"><table id="tSaldo"></table></div>
-  <p class="empty" style="font-size:12px;margin-top:8px">Sleutels: <b>m² × dagen</b> = verhuurbare m² per dag bezetting (niet-bezette m² → De Overmolen) · <b>Ista-verbruik</b> = verbruik van de gekoppelde Ista-meters × dagen · <b>Gelijke delen</b> = gelijk over de huurders, naar rato van hun aanwezigheid · <b>Rechtstreeks</b> = volledig aan één organisatie (bv. eigen elektriciteitsmeter) · <b>Eigen m² + gemeensch. naar aanwezigen</b> = de kost wordt gesplitst volgens verhuurbare vs. gemeenschappelijke m²; het verhuurbare deel per m² × dagen (leegstand → De Overmolen), het gemeenschappelijke deel per dag over de organisaties die er die dag zijn (naar hun m² of in gelijke delen).</p>
+  <p class="empty" style="font-size:12px;margin-top:8px">Sleutels: <b>m² × dagen</b> = verhuurbare m² per dag bezetting (niet-bezette m² → De Overmolen) · <b>Ista-verbruik</b> = verbruik van de gekoppelde Ista-meters × dagen · <b>Gelijke delen</b> = gelijk over de huurders, naar rato van hun aanwezigheid · <b>Rechtstreeks</b> = volledig aan één organisatie (bv. eigen elektriciteitsmeter) · <b>Eigen m² + gemeensch. naar aanwezigen</b> = de kost wordt gesplitst volgens verhuurbare vs. gemeenschappelijke m²; het verhuurbare deel per m² × dagen (leegstand → De Overmolen), het gemeenschappelijke deel per dag over de organisaties die er die dag zijn (naar hun m² of in gelijke delen) · <b>Bezette m² (standaard)</b> = de kost wordt per dag verdeeld over de organisaties die er die dag zijn, naar hun bezette m²; lege ruimten en ruimten op naam van De Overmolen betalen niets (De Overmolen betaalt voor die ruimten enkel de Ista-meters in die ruimten).</p>
 </section>
 
 <section class="view" id="v-orgs" hidden>
@@ -287,8 +287,8 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 
 
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=15"></script>
-<script src="graph.js?v=15"></script>
-<script src="app.js?v=15"></script>
+<script src="config.js?v=16"></script>
+<script src="graph.js?v=16"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>
