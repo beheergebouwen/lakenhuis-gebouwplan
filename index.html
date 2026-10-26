@@ -177,7 +177,15 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 .imp-vo { max-width: 460px }
 #tAfr select.ce, #tAfr input.ce { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); max-width: 200px }
 #aSim { max-width: 260px }
-@media print { body.print-afr header.top, body.print-afr #afrNew, body.print-afr #afrImp, body.print-afr #afrLog, body.print-afr .tablebar button, body.print-afr .cdel, body.print-afr footer, body.print-afr section.view:not(#v-afr) { display: none !important } body.print-afr #v-afr { display: block !important } }
+#afrPdf .orgpdf { font-size: 12px; color: #000 }
+#afrPdf h1 { font-size: 20px; margin: 4px 0 2px } #afrPdf h2 { font-size: 14px; margin: 16px 0 6px }
+#afrPdf .ph { display: flex; justify-content: space-between; gap: 16px; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px }
+#afrPdf table { width: 100%; border-collapse: collapse } #afrPdf th, #afrPdf td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #ccc; vertical-align: top }
+#afrPdf th { color: #000; font-weight: 700; text-transform: none; letter-spacing: 0; font-size: inherit; background: none }
+#afrPdf .num { text-align: right; white-space: nowrap } #afrPdf tfoot th { border-top: 2px solid #000; border-bottom: 0 }
+#afrPdf .sum { width: auto; min-width: 320px } #afrPdf .sml { font-size: 10px; color: #555 } #afrPdf .pf { margin-top: 18px; font-size: 10px; color: #555 }
+@media print { body.print-org { background: #fff } body.print-org::before, body.print-org > *:not(#afrPdf) { display: none !important } body.print-org #afrPdf { display: block !important } #afrPdf .orgpdf { break-after: page } #afrPdf .orgpdf:last-child { break-after: auto } }
+@media print { body.print-afr header.top, body.print-afr #afrNew, body.print-afr #afrImp, body.print-afr #afrLog, body.print-afr .tablebar button, body.print-afr .cdel, body.print-afr #aPdfOrg, body.print-afr footer, body.print-afr section.view:not(#v-afr) { display: none !important } body.print-afr #v-afr { display: block !important } }
 </style>
 </head>
 <body>
@@ -260,7 +268,8 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
     <label>Kalenderjaar <select id="aYear" aria-label="Kalenderjaar"></select></label>
     <label>Simulatie <select id="aSim" aria-label="Simulatie sleutel"></select></label>
     <button class="btn" id="aImp">Importeer Exact (CSV)</button><input type="file" id="aImpFile" accept=".csv,.txt,text/csv" hidden>
-    <button class="btn" id="aExp">Exporteer (CSV)</button><button class="btn" id="aPrint">Afdrukken / PDF</button></div>
+    <button class="btn" id="aExp">Exporteer (CSV)</button><button class="btn" id="aPrint">Afdrukken / PDF</button>
+    <select id="aPdfOrg" aria-label="Organisatie voor PDF"></select><button class="btn" id="aPdf">PDF per organisatie</button></div>
   <p class="empty" id="afrLog" style="font-size:12px;margin:-4px 0 8px"></p>
   <div id="afrImp" hidden></div>
   <p id="afrSimNote" class="imp-warn" hidden style="margin:0 0 8px"></p>
@@ -286,9 +295,10 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 <footer class="foot">Plannen: MVB Architects, grondplannen index g (14.10.2024) en bestaande toestand voorbouw (26.01.2022), gecontroleerd ter plaatse 16.10.2026. Codes: ruimte LK-[verdieping]-[nr], deur LK-D-[verdieping]-[nr], genummerd van straatzijde naar achterzijde.</footer>
 
 
+<div id="afrPdf" hidden></div>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=19"></script>
-<script src="graph.js?v=19"></script>
-<script src="app.js?v=19"></script>
+<script src="config.js?v=20"></script>
+<script src="graph.js?v=20"></script>
+<script src="app.js?v=20"></script>
 </body>
 </html>

@@ -490,9 +490,34 @@ function bindAfr() {
   $('#aSim').onchange = () => { SIMKEY = $('#aSim').value; PSC = {}; renderAfr(); };
   yearSel('#aYear');
   $('#aPrint').onclick = () => { document.body.classList.add('print-afr'); window.print(); setTimeout(() => document.body.classList.remove('print-afr'), 500); };
+  $('#aPdf').onclick = () => orgPdf($('#aPdfOrg').value);
   $('#aExp').onclick = () => { PSC = {}; const cs = costsInPeriod(), orgs = afrOrgs(cs);
     exportCsv('Lakenhuis_afrekening_' + per.from + '_' + per.to + '.csv', ['categorie', 'omschrijving', 'leverancier', 'factuur', 'meter', 'van', 'tot', 'bedrag', 'sleutel', ...orgs],
       cs.map(c => { const sp = split(c); return [c.cat, c.desc, c.supplier, c.invoice || c.entry, c.meter, dfmt(c.from), dfmt(c.to), amtIn(c).toFixed(2), c.key + (c.org ? ' (' + c.org + ')' : ''), ...orgs.map(o => (sp[o] || 0).toFixed(2))]; })); };
+}
+// afrekening per organisatie: één pagina per organisatie, via afdrukken → "Opslaan als PDF"
+function orgPdf(sel) {
+  PSC = {}; const cs = costsInPeriod(), vo = {};
+  VOS.filter(v => v.date && v.date >= per.from && v.date <= per.to).forEach(v => { vo[v.org] = (vo[v.org] || 0) + (Number(v.amount) || 0); });
+  const all = afrOrgs(cs), list = sel ? [sel] : [...all, ...Object.keys(vo).filter(o => !all.includes(o))];
+  if (!list.length) { setStatus('ro', 'Geen organisaties met kosten in deze periode'); return; }
+  const today = dfmt(new Date().toISOString().slice(0, 10));
+  $('#afrPdf').innerHTML = list.map(o => {
+    const rows = cs.map(c => ({ c, sh: split(c)[o] || 0 })).filter(x => Math.abs(x.sh) >= 0.005), sh = rows.reduce((a, x) => a + x.sh, 0), v = vo[o] || 0, sal = sh - v, cat = {};
+    rows.forEach(x => { const k = x.c.cat || 'Overige'; cat[k] = (cat[k] || 0) + x.sh; });
+    return `<section class="orgpdf"><div class="ph"><div>Lakenhuis · VZW De Overmolen<h1>Afrekening gebouwkosten</h1>Periode ${dfmt(per.from)} – ${dfmt(per.to)}</div><div style="text-align:right">Organisatie<h1>${esc(o)}</h1>Opgemaakt op ${today}</div></div>
+      ${SIMKEY ? `<p><b>Simulatie</b> – alle kostenlijnen (behalve 'Rechtstreeks') berekend met "${esc(SIMKEY)}". Geen definitieve afrekening.</p>` : ''}
+      <h2>Overzicht</h2><table class="sum"><tbody><tr><td>Aandeel in de kosten</td><td class="num">${eur2(sh)}</td></tr><tr><td>Betaalde voorschotten</td><td class="num">${v ? eur2(v) : '–'}</td></tr></tbody>
+      <tfoot><tr><th>${sal > 0.005 ? 'Te betalen' : sal < -0.005 ? 'Terug te krijgen' : 'Saldo'}</th><th class="num">${eur2(Math.abs(sal))}</th></tr></tfoot></table>
+      ${rows.length ? `<h2>Per categorie</h2><table class="sum"><tbody>${Object.entries(cat).map(([k, n]) => `<tr><td>${esc(k)}</td><td class="num">${eur2(n)}</td></tr>`).join('')}</tbody></table>
+      <h2>Detail kostenposten</h2><table><thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Verdeelsleutel</th><th class="num">Uw aandeel</th></tr></thead><tbody>` +
+        rows.map(({ c, sh }) => `<tr><td>${esc(c.cat)}</td><td>${esc(c.desc)}${c.supplier || c.invoice ? `<br><span class="sml">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice].filter(Boolean).join(' · '))}</span>` : ''}</td><td style="white-space:nowrap">${dfmt(ovl(c).A)} – ${dfmt(ovl(c).B)}</td><td class="num">${eur2(amtIn(c))}</td><td>${esc(SIMKEY && c.key !== KEYS[3] ? SIMKEY : c.key || KDEF)}</td><td class="num">${eur2(sh)}</td></tr>`).join('') +
+        `</tbody><tfoot><tr><th colspan="5">Totaal aandeel</th><th class="num">${eur2(sh)}</th></tr></tfoot></table>` : '<p>Geen kosten aangerekend in deze periode.</p>'}
+      <p class="pf">Bedragen = deel van elke kostenpost dat in de periode valt, verdeeld volgens de vermelde sleutel. Voorschotten = betalingen met boekdatum in de periode.</p></section>`;
+  }).join('');
+  const t = document.title; document.title = 'Lakenhuis_afrekening_' + (sel || 'alle_organisaties').replace(/[^\w-]+/g, '_') + '_' + per.from + '_' + per.to;
+  document.body.classList.add('print-org'); window.print();
+  setTimeout(() => { document.body.classList.remove('print-org'); document.title = t; }, 500);
 }
 function afrOrgs(cs) { const set = new Set(); cs.forEach(c => Object.keys(split(c)).forEach(o => set.add(o))); return [...ORGS.map(o => o.name).filter(n => set.has(n)), ...[...set].filter(n => !ORGS.some(o => o.name === n))]; }
 function renderAfr() {
@@ -528,6 +553,7 @@ function renderAfr() {
   const vo = {}; VOS.filter(v => v.date && v.date >= per.from && v.date <= per.to).forEach(v => { vo[v.org] = (vo[v.org] || 0) + (Number(v.amount) || 0); });
   const sorgs = [...orgs, ...Object.keys(vo).filter(o => !orgs.includes(o))];
   const saldo = o => (tot[o] || 0) - (vo[o] || 0);
+  const po = $('#aPdfOrg').value; $('#aPdfOrg').innerHTML = '<option value="">Alle organisaties</option>' + sorgs.map(o => `<option>${esc(o)}</option>`).join(''); $('#aPdfOrg').value = sorgs.includes(po) ? po : '';
   $('#afrSimNote').hidden = !SIMKEY; $('#afrSimNote').textContent = SIMKEY ? `Simulatie: alle kostenlijnen (behalve 'Rechtstreeks') berekend met "${SIMKEY}". Niets wordt opgeslagen – zet terug op 'Sleutel per kostenlijn' voor de echte afrekening.` : '';
   $('#afrCards').innerHTML = `<div class="card"><span class="k">Periode</span><span class="v" style="font-size:20px">${dfmt(per.from)} – ${dfmt(per.to)}</span><span class="k">${cs.length} kostenposten</span></div>
     <div class="card"><span class="k">Totale kosten</span><span class="v">${eur2(total)}</span></div>` +
