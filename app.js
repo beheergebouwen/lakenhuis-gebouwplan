@@ -682,11 +682,12 @@ function diffImport(P) {
   const ec = new Map(COSTS.filter(c => c.uid).map(c => [c.uid, c])), seenC = new Set();
   for (const c of P.costs) { seenC.add(c.uid); const o = ec.get(c.uid);
     if (!o) R.cAdd.push(c); else if (Math.abs((Number(o.amount) || 0) - c.amount) > 0.004 || (o.desc || '') !== c.desc || (o.supplier || '') !== c.supplier) R.cChg.push({ n: c, o, on: true }); else R.cSame.push(c); }
-  for (const o of COSTS) if (o.src === 'Exact' && o.uid && !seenC.has(o.uid) && inR(o.bdate)) R.cDel.push({ o, on: true });
+  // enkel als het bestand zelf kostenlijnen bevat; nooit standaard aangevinkt (gebruiker beslist)
+  if (P.costs.length) for (const o of COSTS) if (o.src === 'Exact' && o.uid && !seenC.has(o.uid) && inR(o.bdate)) R.cDel.push({ o, on: false });
   const ev = new Map(VOS.filter(v => v.uid).map(v => [v.uid, v])), seenV = new Set();
   for (const v of P.vos) { seenV.add(v.uid); const o = ev.get(v.uid);
     if (!o) R.vAdd.push(v); else if (Math.abs((Number(o.amount) || 0) - v.amount) > 0.004 || (o.desc || '') !== v.desc) R.vChg.push({ n: v, o, on: true }); else R.vSame.push(v); }
-  for (const o of VOS) if (o.src === 'Exact' && o.uid && !seenV.has(o.uid) && inR(o.date)) R.vDel.push({ o, on: true });
+  if (P.vos.length) for (const o of VOS) if (o.src === 'Exact' && o.uid && !seenV.has(o.uid) && inR(o.date)) R.vDel.push({ o, on: false });
   R.cAdd.forEach(c => { c.on = true; });
   return R;
 }
