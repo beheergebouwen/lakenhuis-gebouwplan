@@ -585,6 +585,7 @@ function renderAfr() {
 // ---------- import Exact Online (export "FinTransactionSearch": CSV/TXT, tab of ; gescheiden, UTF-16 of UTF-8)
 const ORG_ALIAS = [[/accolage/i, 'Accolage'], [/huisartsenkring|\bbhak\b/i, 'BHAK'], [/ondersteuningsplan|^d\.?o\.?p\.?$/i, 'DOP'], [/huis voor gezondheid/i, 'Huis voor Gezondheid'], [/kenniscentrum|\bwwz\b/i, 'Kenniscentrum WWZ'], [/overmolen/i, 'De Overmolen']];
 let ORGMAP = {}; try { ORGMAP = JSON.parse(localStorage.getItem('lk.orgmap') || '{}'); } catch (e) {}
+function orgFromDesc(d) { return /\bd\.?\s?o\.?\s?p\b/i.test(d || '') ? mapOrg('DOP') : mapOrg(d); }
 function mapOrg(n) {
   if (!n) return ''; if (ORGMAP[n]) return ORGMAP[n];
   const exact = ORGS.find(x => x.name.toLowerCase() === n.toLowerCase()); if (exact) return exact.name;
@@ -677,7 +678,11 @@ function parseExact(text) {
       const [from, to, psrc] = bookPer(l), ck = catKey(l.gl, l.desc, l.rel);
       costs.push({ uid: l.uid, entry: l.entry, bdate: l.date, gl: (l.gl + ' ' + l.glName).trim(), desc: l.desc || l.glName, supplier: l.rel, amount: amt, from, to, psrc, cat: ck.cat, key: ck.key, org: ck.org, warn: ck.warn, src: 'Exact', invoice: '', meter: '', note: '' });
     } else if (l.gl === '702000' && /^huur$/i.test(l.journal)) {
-      vos.push({ uid: l.uid, entry: l.entry, date: l.date, rel: l.rel, org: mapOrg(l.rel), amount: -amt, desc: l.desc, src: 'Exact' });
+      // correctie van een vorig jaar (bv. "AHL lakenhuis 2022") is geen voorschot van dit jaar
+      const oldY = (l.desc.match(/\b20\d\d\b/g) || []).some(y => +y < +l.date.slice(0, 4));
+      if (oldY) { const k = 'Niet meegeteld: correctie vorig jaar · ' + l.desc + (l.rel ? ' (' + l.rel + ')' : ''); info[k] = info[k] || { n: 0, sum: 0 }; info[k].n++; info[k].sum += amt; continue; }
+      // geen relatie in Exact: huurder uit de omschrijving halen (bv. "Huurlasten burelen D.O.P")
+      vos.push({ uid: l.uid, entry: l.entry, date: l.date, rel: l.rel || l.desc, org: mapOrg(l.rel) || orgFromDesc(l.desc), amount: -amt, desc: l.desc, src: 'Exact' });
     } else { const k = (l.journalName || l.journal) + ' · ' + l.gl + ' ' + l.glName; info[k] = info[k] || { n: 0, sum: 0 }; info[k].n++; info[k].sum += amt; }
   }
   // lijn zonder periode in de omschrijving: neem de periode van een andere lijn van hetzelfde boekstuk
