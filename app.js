@@ -63,6 +63,7 @@ async function reload(first) {
   S.meters = Object.fromEntries(meters.map(m => [m.nr, m]));
   ORGS = (orgs || []).filter(o => o.name).map(o => ({ _id: o._id, name: o.name, color: o.color || '#e6e2d6', type: o.type || 'Huurder' })).sort((a, b) => a.name.localeCompare(b.name));
   S.settings = (settings || []).find(x => x.key === 'ista') || S.settings;
+  { const rr = (settings || []).find(x => x.key === 'regels'); RULES_ID = rr ? rr._id : null; try { RULES = JSON.parse(rr && rr.rules || '{}'); } catch (e) { RULES = {}; } }
   for (const k of ['heatCost', 'totalUnits', 'rentTotal', 'meterCount']) S.settings[k] = Number(S.settings[k]) || 0;
   if (!per) { const y = +peil.slice(0, 4) - 1; per = { from: y + '-01-01', to: y + '-12-31' }; }   // standaard: vorig kalenderjaar
   if (!first) setStatus('live', 'Verbonden met SharePoint · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }));
@@ -561,8 +562,16 @@ function renderAfr() {
   $('#tSaldo').innerHTML = sorgs.length ? `<thead><tr><th>Organisatie</th><th class="num">Aandeel kosten</th><th class="num">Betaalde voorschotten</th><th class="num">Saldo</th><th></th></tr></thead><tbody>` +
     sorgs.map(o => `<tr><td><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</td><td class="num mono">${eur2(tot[o] || 0)}</td><td class="num mono">${vo[o] ? eur2(vo[o]) : '–'}</td><td class="num mono"><b>${eur2(saldo(o))}</b></td><td>${o === 'De Overmolen' ? '<span class="empty">eigen deel / leegstand</span>' : saldo(o) > 0.005 ? '<span class="err">te betalen</span>' : saldo(o) < -0.005 ? '<span class="saved">terug te krijgen</span>' : ''}</td></tr>`).join('') +
     `</tbody><tfoot><tr><th>Totaal</th><th class="num mono">${eur2(Object.values(tot).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(Object.values(vo).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(sorgs.reduce((a, o) => a + saldo(o), 0))}</th><th></th></tr></tfoot>` : '';
+  { const V = voGrid(VOS, per.from, per.to), stc = { ok: '', anders: 'background:#fff3cd', mist: 'background:#fde2e1', niet: 'color:#aaa', later: 'color:#aaa' };
+    $('#tVo').innerHTML = V.rows.length ? `<thead><tr><th>Organisatie</th>${V.months.map(m => `<th class="num">${MON[+m.slice(5, 7) - 1]}</th>`).join('')}<th class="num">Gewoonlijk</th></tr></thead><tbody>` +
+      V.rows.map(r => `<tr><td><span class="swatch" style="background:${orgColor(r.o) || '#ddd'}"></span>${esc(r.o)}</td>${r.cells.map(c => `<td class="num mono" style="font-size:12px;${stc[c.st]}" title="${c.st === 'mist' ? 'Ruimte bezet, geen voorschot' : c.st === 'later' ? 'Nog niet geïmporteerd' : c.st === 'niet' ? 'Geen ruimte die maand' : ''}">${c.st === 'mist' ? '<b class="err">ontbreekt</b>' : c.st === 'later' ? '·' : c.st === 'niet' ? '–' : eur2(c.p).replace(/\s?€/, '')}</td>`).join('')}<td class="num mono">${eur2(r.usual)}</td></tr>`).join('') + '</tbody>' : '<tbody><tr><td class="empty">Nog geen voorschotten in deze periode.</td></tr></tbody>';
+    $('#voGaps').innerHTML = V.gaps.length ? `<b class="err">Na te vragen bij de boekhouder (${V.gaps.length}):</b> ${V.gaps.map(g => esc(gapText(g))).join(' · ')}` : (V.rows.length ? '<span class="saved">✓ Alle voorschotten aanwezig' + (V.last && V.last < per.to.slice(0, 7) ? ' t.e.m. ' + moName(V.last) : '') + '</span>' : '');
+    const rk = Object.entries(RULES);
+    $('#rulesBox').innerHTML = rk.length ? `<summary>Geleerde keuzes bij import (${rk.length})</summary><ul class="mini" style="margin-top:6px">${rk.map(([k, r]) => `<li><span>${esc(r.sup || k)} · ${esc(k.split('|')[1])}: ${r.on === false ? '<b>niet in afrekening</b>' : esc([r.cat, r.key, r.org].filter(Boolean).join(' · '))}</span>${canWrite ? `<button class="occdel rdel" data-k="${esc(k)}" title="Vergeten">✕</button>` : ''}</li>`).join('')}</ul>` : '<summary>Geleerde keuzes bij import (0)</summary><p class="empty" style="font-size:12px">Wijzig je bij een Exact-lijn de categorie of sleutel, of verwijder je ze, dan doet de app dat bij de volgende import automatisch voor die leverancier.</p>';
+    $('#rulesBox').onclick = async e => { const b = e.target.closest('.rdel'); if (!b) return; delete RULES[b.dataset.k]; await saveRules(); renderAfr(); };
+  }
   $('#tAfr').innerHTML = cs.length ? `<thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Sleutel</th>${orgs.map(o => `<th class="num"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</th>`).join('')}<th></th></tr></thead><tbody>` +
-    cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td>${canWrite ? `<select class="ce" data-f="cat">${[...new Set([...CATS, c.cat || ''])].filter(Boolean).map(x => `<option${x === c.cat ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : esc(c.cat)}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.entry && 'boekstuk ' + c.entry, c.gl, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}</td>
+    cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td>${canWrite ? `<select class="ce" data-f="cat">${[...new Set([...CATS, c.cat || ''])].filter(Boolean).map(x => `<option${x === c.cat ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : esc(c.cat)}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.entry && 'boekstuk ' + c.entry, c.gl, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}${c.cu && !/^huurpat$/i.test(c.cu) ? '<br><span class="imp-warn">⚠ geen HUURPAT in Exact</span>' : ''}</td>
       <td class="mono" style="font-size:12px;white-space:nowrap">${canWrite ? `<input type="date" class="ce" data-f="from" value="${c.from || ''}"><br><input type="date" class="ce" data-f="to" value="${c.to || ''}">` : dfmt(c.from) + '<br>' + dfmt(c.to)}</td><td class="num mono">${eur2(amtIn(c))}${ovl(c).f < 0.9999 ? `<br><span class="empty" style="font-size:10px">${Math.round(ovl(c).f * 100)}% van ${eur2(Number(c.amount) || 0)}</span>` : ''}</td><td style="font-size:12px">${canWrite ? `<select class="ce" data-f="key">${KEYS.map(k => `<option${k === (c.key || KDEF) ? ' selected' : ''}>${esc(k)}</option>`).join('')}</select>${c.key === KEYS[3] ? `<br><select class="ce" data-f="org">${ORGS.map(o => `<option${o.name === c.org ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select>` : ''}` : esc(c.key) + (c.org ? '<br><b>' + esc(c.org) + '</b>' : '')}${SIMKEY && c.key !== KEYS[3] ? '<br><span class="imp-warn">simulatie: ' + esc(SIMKEY) + '</span>' : ''}</td>
       ${orgs.map(o => `<td class="num mono">${sp[o] ? eur2(sp[o]) : '–'}</td>`).join('')}<td>${canWrite ? '<button class="occdel cdel" title="Verwijderen">✕</button>' : ''}</td></tr>`; }).join('') +
     `</tbody><tfoot><tr><th colspan="3">Totaal</th><th class="num mono">${eur2(total)}</th><th></th>${orgs.map(o => `<th class="num mono">${eur2(tot[o] || 0)}</th>`).join('')}<th></th></tr></tfoot>` : '<tbody><tr><td class="empty">Nog geen kostenposten in deze periode. Voeg ze hierboven toe.</td></tr></tbody>';
@@ -572,14 +581,14 @@ function renderAfr() {
     if (f === 'key') { patch.org = el.value === KEYS[3] ? (c.org || 'De Overmolen') : ''; }
     if (f === 'cat') { /* enkel categorie */ }
     if ((f === 'from' && el.value > (c.to || '9')) || (f === 'to' && el.value < (c.from || '0'))) { setStatus('ro', "'Tot' ligt vóór 'Van' – niet opgeslagen"); renderAfr(); return; }
-    try { await LK.save('costs', patch); Object.assign(c, patch); PSC = {}; renderAfr(); setStatus('live', 'Kostenpost aangepast · herberekend · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); }
+    try { await LK.save('costs', patch); Object.assign(c, patch); PSC = {}; if (c.src === 'Exact' && /cat|key|org/.test(f)) { learn(c, { cat: c.cat, key: c.key, org: c.key === KEYS[3] ? c.org : '' }); saveRules(); } renderAfr(); setStatus('live', 'Kostenpost aangepast · herberekend · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); }
     catch (er) { setStatus('ro', 'Niet opgeslagen: ' + (er.status === 403 ? 'geen bewerkrechten' : er.message)); renderAfr(); }
   };
   $('#tAfr').onclick = async e => {
     const b = e.target.closest('.cdel'); if (!b) return; const tr = b.closest('tr');
     if (!tr.dataset.confirm) { tr.dataset.confirm = 1; b.textContent = 'Zeker?'; b.style.width = 'auto'; return; }
     const c = COSTS.find(x => String(x._id) === tr.dataset.id); if (!c) return;
-    try { await LK.remove('costs', c._id); COSTS = COSTS.filter(x => x !== c); renderAfr(); } catch (er) { setStatus('ro', 'Niet verwijderd: ' + er.message); }
+    try { await LK.remove('costs', c._id); COSTS = COSTS.filter(x => x !== c); if (c.src === 'Exact') { learn(c, { on: false }); saveRules(); } renderAfr(); } catch (er) { setStatus('ro', 'Niet verwijderd: ' + er.message); }
   };
 }
 // ---------- import Exact Online (export "FinTransactionSearch": CSV/TXT, tab of ; gescheiden, UTF-16 of UTF-8)
@@ -595,7 +604,7 @@ function mapOrg(n) {
 const HDR = { date: ['EntryDate', 'Boekdatum', 'Datum'], entry: ['EntryNumber', 'Boekstuknummer', 'Boekstuk'], journal: ['JournalCodeDescriptionCode', 'Dagboek', 'Dagboekcode'],
   journalName: ['JournalCodeDescriptionDescription', 'Dagboek omschrijving'], gl: ['GLAccountCodeDescriptionCode', 'Grootboekrekening', 'Grootboek'],
   glName: ['GLAccountCodeDescriptionDescription', 'Grootboekrekening omschrijving'], desc: ['Description', 'Omschrijving'], rel: ['AccountCodeNameDescription', 'Relatie', 'Naam'],
-  amount: ['AmountDC', 'Bedrag', 'Bedrag DC'], cc: ['CostCenterCodeDescriptionDescription', 'Kostenplaats'], period: ['ReportingYearPeriod', 'Boekperiode', 'Periode'] };
+  amount: ['AmountDC', 'Bedrag', 'Bedrag DC'], cc: ['CostCenterCodeDescriptionDescription', 'Kostenplaats'], period: ['ReportingYearPeriod', 'Boekperiode', 'Periode'], cu: ['CostUnitCodeDescriptionCode', 'Kostendrager'] };
 function decodeFile(buf) {
   const b = new Uint8Array(buf);
   if (b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf);
@@ -660,6 +669,41 @@ function catKey(gl, desc, rel) {
   }
   return { cat, key, org, warn };
 }
+// ---------- slim importeren: HUURPAT, geleerde keuzes, ontbrekende voorschotten
+const OWNER_RE = /\bepb\b|schilder|verfwerk|\bgsm\b|smartphone|huurvermindering|renovatie|investering/i;
+let RULES = {}, RULES_ID = null;
+const ruleKey = c => { const s = String(c.supplier || '').toLowerCase().replace(/\b(nv|bv|sa|srl|bvba|vzw|n\.v\.|s\.a\.)\b/g, '').replace(/[^a-z]/g, '').slice(0, 30); return (s || String(c.desc || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 30)) + '|' + String(c.gl || '').slice(0, 4); };
+function applyRules(costs) {
+  for (const c of costs) { const r = RULES[ruleKey(c)]; if (!r) continue;
+    if (r.cat) c.cat = r.cat; if (r.key) c.key = r.key; if (r.key === KEYS[3]) c.org = r.org || c.org || 'De Overmolen'; if ('on' in r) c.on = r.on;
+    c.warn = (c.warn ? c.warn + ' · ' : '') + '✓ zoals je vorige keer koos' + (r.on === false ? ' (niet in afrekening)' : ''); c.learned = true; }
+}
+function learn(c, ch) { const k = ruleKey(c); RULES[k] = { ...(RULES[k] || {}), ...ch, sup: c.supplier || c.desc, at: ymd(new Date()) }; }
+async function saveRules() {
+  const o = { key: 'regels', rules: JSON.stringify(RULES) }; if (RULES_ID) o._id = RULES_ID;
+  try { await LK.save('settings', o); RULES_ID = o._id; } catch (e) { setStatus('ro', 'Geleerde keuze niet bewaard: ' + e.message); }
+}
+const MON = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+// per huurder: welke maanden had er een voorschot moeten zijn (ruimte bezet die maand) en zijn er geen?
+function voGrid(vos, from, to) {
+  const all = vos.filter(v => v.date).map(v => v.date.slice(0, 7)).sort(), last = all[all.length - 1] || '';
+  const months = []; for (let y = +from.slice(0, 4), m = +from.slice(5, 7); isoD(y, m, 1) <= to; m === 12 ? (y++, m = 1) : m++) months.push(isoD(y, m, 1).slice(0, 7));
+  const orgs = ORGS.filter(o => !/overmolen/i.test(o.name)).map(o => o.name), rows = [], gaps = [];
+  for (const o of orgs) {
+    const paid = {}; vos.filter(v => v.org === o && v.date >= from && v.date <= to).forEach(v => { const k = v.date.slice(0, 7); paid[k] = (paid[k] || 0) + (Number(v.amount) || 0); });
+    const amts = Object.values(paid).map(a => Math.round(a * 100) / 100), cnt = {}; amts.forEach(a => cnt[a] = (cnt[a] || 0) + 1);
+    const usual = +(Object.entries(cnt).sort((a, b) => b[1] - a[1])[0] || [0])[0];
+    const cells = months.map(mo => { const A = mo + '-01', B = mo + '-' + lastDay(mo.slice(0, 4), mo.slice(5, 7));
+      const exp = OCC.some(x => x.org === o && (!x.from || x.from <= B) && (!x.to || x.to >= A)), p = paid[mo] || 0;
+      const st = mo > last ? 'later' : p ? (usual && Math.abs(p - usual) > 0.5 ? 'anders' : 'ok') : exp ? 'mist' : 'niet';
+      if (st === 'mist') gaps.push({ org: o, mo, usual }); if (st === 'anders') gaps.push({ org: o, mo, usual, paid: p });
+      return { mo, st, p }; });
+    if (cells.some(c => c.st !== 'niet' && c.st !== 'later') || cells.some(c => c.st === 'mist')) rows.push({ o, usual, cells });
+  }
+  return { months, rows, gaps, last };
+}
+const moName = mo => MON[+mo.slice(5, 7) - 1] + ' ' + mo.slice(0, 4);
+const gapText = g => g.paid != null ? `${g.org} ${moName(g.mo)}: ${eur2(g.paid)} i.p.v. ${eur2(g.usual)}` : `${g.org} ${moName(g.mo)}: geen voorschot`;
 function parseExact(text) {
   const rows = parseDelim(text); if (rows.length < 2) throw new Error('Leeg bestand.');
   const h = rows[0].map(x => x.toLowerCase()), ix = {};
@@ -668,7 +712,7 @@ function parseExact(text) {
   if (need.length) throw new Error('Kolommen niet gevonden (' + need.join(', ') + '). Gevonden kolommen: ' + rows[0].join(' | '));
   const get = (r, k) => ix[k] >= 0 ? (r[ix[k]] || '') : '';
   const lines = rows.slice(1).map(r => ({ date: toIso(get(r, 'date')), entry: get(r, 'entry'), journal: get(r, 'journal'), journalName: get(r, 'journalName'), gl: get(r, 'gl'), glName: get(r, 'glName'),
-    desc: get(r, 'desc'), rel: get(r, 'rel'), amount: numNL(get(r, 'amount')), cc: get(r, 'cc'), per: get(r, 'period') })).filter(l => l.date && l.entry);
+    desc: get(r, 'desc'), rel: get(r, 'rel'), amount: numNL(get(r, 'amount')), cc: get(r, 'cc'), per: get(r, 'period'), cu: get(r, 'cu').trim() })).filter(l => l.date && l.entry);
   const groups = {}; for (const l of lines) (groups[l.entry + '|' + l.gl] = groups[l.entry + '|' + l.gl] || []).push(l);
   for (const [k, ls] of Object.entries(groups)) { ls.sort((a, b) => a.desc.localeCompare(b.desc) || a.amount - b.amount); ls.forEach((l, i) => { l.uid = 'EX:' + k + '|' + (i + 1); }); }
   const costs = [], vos = [], info = {};
@@ -676,7 +720,10 @@ function parseExact(text) {
     const amt = Math.round(l.amount * 100) / 100;
     if (/^6/.test(l.gl)) {
       const [from, to, psrc] = bookPer(l), ck = catKey(l.gl, l.desc, l.rel);
-      costs.push({ uid: l.uid, entry: l.entry, bdate: l.date, gl: (l.gl + ' ' + l.glName).trim(), desc: l.desc || l.glName, supplier: l.rel, amount: amt, from, to, psrc, cat: ck.cat, key: ck.key, org: ck.org, warn: ck.warn, src: 'Exact', invoice: '', meter: '', note: '' });
+      costs.push({ uid: l.uid, entry: l.entry, bdate: l.date, gl: (l.gl + ' ' + l.glName).trim(), desc: l.desc || l.glName, supplier: l.rel, amount: amt, from, to, psrc, cat: ck.cat, key: ck.key, org: ck.org, warn: ck.warn, src: 'Exact', invoice: '', meter: '', note: '', cu: l.cu });
+      const c = costs[costs.length - 1];
+      if (ix.cu >= 0 && !/^huurpat$/i.test(l.cu)) { c.on = false; c.warn = (c.warn ? c.warn + ' · ' : '') + 'Geen HUURPAT in Exact' + (l.cu ? ' (' + l.cu + ')' : '') + ' → eigenaarskost, niet in afrekening (vink aan om toch mee te nemen)'; }
+      else if (OWNER_RE.test(l.desc + ' ' + l.glName) || l.gl.startsWith('6110')) c.warn = (c.warn ? c.warn + ' · ' : '') + 'HUURPAT, maar lijkt een eigenaarskost – vraag na bij de boekhouder';
     } else if (l.gl === '702000' && /^huur$/i.test(l.journal)) {
       // correctie van een vorig jaar (bv. "AHL lakenhuis 2022") is geen voorschot van dit jaar
       const oldY = (l.desc.match(/\b20\d\d\b/g) || []).some(y => +y < +l.date.slice(0, 4));
@@ -702,7 +749,7 @@ function diffImport(P) {
   for (const v of P.vos) { seenV.add(v.uid); const o = ev.get(v.uid);
     if (!o) R.vAdd.push(v); else if (Math.abs((Number(o.amount) || 0) - v.amount) > 0.004 || (o.desc || '') !== v.desc) R.vChg.push({ n: v, o, on: true }); else R.vSame.push(v); }
   if (P.vos.length) for (const o of VOS) if (o.src === 'Exact' && o.uid && !seenV.has(o.uid) && inR(o.date)) R.vDel.push({ o, on: false });
-  R.cAdd.forEach(c => { c.on = true; });
+  R.cAdd.forEach(c => { c.on = c.on !== false; });
   return R;
 }
 let IMP = null;   // {file, P, R}
@@ -712,9 +759,18 @@ function bindImport() {
   $('#aImpFile').onchange = async e => {
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;
     const box = $('#afrImp'); box.hidden = false; box.innerHTML = '<p>Bestand lezen…</p>';
-    try { const P = parseExact(decodeFile(await f.arrayBuffer())); IMP = { file: f, P, R: diffImport(P) }; renderImport(); }
+    try { const P = parseExact(decodeFile(await f.arrayBuffer())); applyRules(P.costs); IMP = { file: f, P, R: diffImport(P), learned: {} }; renderImport(); }
     catch (er) { box.innerHTML = `<div class="occbox"><b class="err">Import mislukt:</b> ${esc(er.message)} <button class="btn" id="impX">Sluiten</button></div>`; $('#impX').onclick = () => { box.hidden = true; }; }
   };
+}
+function impChecks(P, R) {
+  const L = [];
+  const noHp = P.costs.filter(c => /Geen HUURPAT/.test(c.warn || '')), own = P.costs.filter(c => /lijkt een eigenaarskost/.test(c.warn || ''));
+  if (noHp.length) L.push(`<b>${noHp.length} kostenlijn(en) zonder HUURPAT</b> (${eur2(noHp.reduce((s, c) => s + c.amount, 0))}) staan uit. Moet een ervan toch in de afrekening? Vink aan en vraag de boekhouder HUURPAT toe te voegen.`);
+  if (own.length) L.push(`<b>${own.length} lijn(en) met HUURPAT die op een eigenaarskost lijken:</b> ${own.map(c => esc(c.entry + ' ' + c.desc) + ' (' + eur2(c.amount) + ')').join(' · ')}`);
+  if (P.vos.length) { const g = voGrid([...VOS, ...R.vAdd], P.from, P.to).gaps; if (g.length) L.push(`<b>Voorschotten om na te vragen:</b> ${g.map(x => esc(gapText(x))).join(' · ')}`); }
+  const ln = P.costs.filter(c => c.learned).length; if (ln) L.push(`${ln} lijn(en) automatisch ingevuld zoals je vorige keer koos.`);
+  return L.length ? `<div class="imp-map" style="display:block"><b class="imp-warn">Controle boekhouding</b><ul style="margin:4px 0 0 18px;padding:0;font-size:13px">${L.map(x => '<li>' + x + '</li>').join('')}</ul></div>` : '';
 }
 function renderImport() {
   const box = $('#afrImp'); if (!IMP) { box.hidden = true; box.innerHTML = ''; return; }
@@ -741,6 +797,7 @@ function renderImport() {
       <div class="card ${R.cDel.length + R.vDel.length ? 'badc' : ''}"><span class="k">Niet meer in Exact</span><span class="v">${R.cDel.length + R.vDel.length}</span></div>
       <div class="card"><span class="k">Voorschotten (702000 · HUUR)</span><span class="v">${eur2(sum(P.vos))}</span><span class="k">${P.vos.length} lijnen · ${R.vAdd.length} nieuw</span></div>
     </div>
+    ${impChecks(P, R)}
     ${unmapped.length ? `<div class="imp-map"><b class="imp-warn">Koppel deze huurders aan een organisatie:</b>${unmapped.map(n => `<label>${esc(n)} → <select class="imap" data-n="${esc(n)}"><option value="">– kies –</option>${opt(orgNames, '')}</select></label>`).join('')}</div>` : ''}
     ${R.cChg.length ? `<h3>Gewijzigd in Exact (${R.cChg.length})</h3><div class="tscroll"><table class="imp-t"><thead><tr><th>Bijwerken</th><th>Boekstuk</th><th>Omschrijving</th><th class="num">Oud</th><th class="num">Nieuw</th></tr></thead><tbody>${R.cChg.map((x, i) => `<tr class="chg" data-i="${i}" data-k="cChg"><td><input type="checkbox" class="ion" ${x.on ? 'checked' : ''}></td><td class="mono">${esc(x.n.entry)}</td><td class="wrap">${esc(x.o.desc)}${x.o.desc !== x.n.desc ? '<br>→ ' + esc(x.n.desc) : ''}</td><td class="num mono">${eur2(Number(x.o.amount) || 0)}</td><td class="num mono">${eur2(x.n.amount)}</td></tr>`).join('')}</tbody></table></div><p class="empty" style="font-size:12px">Bij bijwerken veranderen enkel bedrag, omschrijving, leverancier en grootboek. Jouw categorie, sleutel en periode blijven.</p>` : ''}
     ${R.cDel.length ? `<h3>Niet meer in Exact (${R.cDel.length})</h3><div class="tscroll"><table class="imp-t"><thead><tr><th>Verwijderen</th><th>Boekstuk</th><th>Omschrijving</th><th class="num">Bedrag</th></tr></thead><tbody>${R.cDel.map((x, i) => `<tr class="del" data-i="${i}" data-k="cDel"><td><input type="checkbox" class="ion" ${x.on ? 'checked' : ''}></td><td class="mono">${esc(x.o.entry)}</td><td class="wrap">${esc(x.o.desc)}</td><td class="num mono">${eur2(Number(x.o.amount) || 0)}</td></tr>`).join('')}</tbody></table></div>` : ''}
@@ -755,7 +812,8 @@ function renderImport() {
     const t = e.target;
     if (t.classList.contains('imap')) { if (t.value) { ORGMAP[t.dataset.n] = t.value; try { localStorage.setItem('lk.orgmap', JSON.stringify(ORGMAP)); } catch (er) {} [...P.vos].forEach(v => { if (v.rel === t.dataset.n) v.org = t.value; }); renderImport(); } return; }
     const tr = t.closest('tr[data-k]'); if (!tr) return; const it = arr(tr.dataset.k)[+tr.dataset.i];
-    if (t.classList.contains('ion')) it.on = t.checked;
+    if (t.classList.contains('ion')) { it.on = t.checked; if (tr.dataset.k === 'cAdd') IMP.learned[ruleKey(it)] = { c: it, ch: { ...(IMP.learned[ruleKey(it)] || {}).ch, on: t.checked } }; }
+    if (tr.dataset.k === 'cAdd' && /icat|ikey|iorg/.test(t.className)) setTimeout(() => { IMP.learned[ruleKey(it)] = { c: it, ch: { ...(IMP.learned[ruleKey(it)] || {}).ch, cat: it.cat, key: it.key, org: it.key === KEYS[3] ? it.org : '' } }; });
     const c = it; if (tr.dataset.k !== 'cAdd') return;
     if (t.classList.contains('icat')) { c.cat = t.value; c.key = t.value === 'Gas / verwarming' ? KEYS[1] : t.value === 'Elektriciteit eigen meter' || t.value === 'Huur / huurvermindering' ? KEYS[3] : KDEF; renderImport(); }
     if (t.classList.contains('ikey')) { c.key = t.value; if (c.key === KEYS[3] && !c.org) c.org = 'De Overmolen'; tr.querySelector('.iorg').hidden = c.key !== KEYS[3]; }
@@ -771,7 +829,7 @@ async function saveImport() {
   if (P.vos.some(v => !v.org)) { msg.className = 'err'; msg.textContent = 'Koppel eerst alle huurders aan een organisatie.'; return; }
   if (R.cAdd.some(c => c.on && c.from > c.to)) { msg.className = 'err'; msg.textContent = "Een periode heeft 'Tot' vóór 'Van'."; return; }
   const ops = [];
-  for (const c of R.cAdd) if (c.on) { const o = { ...c }; delete o.on; delete o.psrc; delete o.warn; if (o.key !== KEYS[3]) o.org = ''; ops.push({ kind: 'costs', op: 'add', obj: o }); }
+  for (const c of R.cAdd) if (c.on) { const o = { ...c }; delete o.on; delete o.psrc; delete o.warn; delete o.learned; if (o.key !== KEYS[3]) o.org = ''; ops.push({ kind: 'costs', op: 'add', obj: o }); }
   for (const x of R.cChg) if (x.on) ops.push({ kind: 'costs', op: 'upd', obj: { _id: x.o._id, amount: x.n.amount, desc: x.n.desc, supplier: x.n.supplier, gl: x.n.gl, entry: x.n.entry, bdate: x.n.bdate } });
   for (const x of R.cDel) if (x.on) ops.push({ kind: 'costs', op: 'del', obj: { _id: x.o._id } });
   for (const v of R.vAdd) ops.push({ kind: 'vo', op: 'add', obj: v });
@@ -786,6 +844,7 @@ async function saveImport() {
     try { await LK.uploadFile(`${window.LK_CONFIG.importFolder}/${stamp}_${file.name}`, file); note = 'Bestand: ' + window.LK_CONFIG.importFolder + '/' + stamp + '_' + file.name; } catch (er) { note = 'Bestand niet bewaard: ' + er.message; }
     const n = k => ops.filter(o => o.op === k).length;
     try { await LK.save('imp', { file: file.name, at: new Date().toLocaleString('nl-BE'), from: P.from, to: P.to, lines: P.lines.length, added: n('add'), changed: n('upd'), removed: n('del'), who: $('#who').textContent, note }); } catch (er) { note += ' · log niet bewaard: ' + er.message; }
+    if (Object.keys(IMP.learned || {}).length) { for (const { c, ch } of Object.values(IMP.learned)) learn(c, ch); await saveRules(); }
     await reload(); IMP = null; renderAll(true);
     setStatus('live', `Import klaar: ${n('add')} nieuw · ${n('upd')} bijgewerkt · ${n('del')} verwijderd`);
     const box = $('#afrImp'); box.hidden = false; box.innerHTML = `<div class="occbox"><b class="saved">✓ Import opgeslagen</b> – ${n('add')} nieuw · ${n('upd')} bijgewerkt · ${n('del')} verwijderd. <span class="empty">${esc(note)}</span> <button class="btn" id="impX">Sluiten</button></div>`;

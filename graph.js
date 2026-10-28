@@ -15,11 +15,11 @@
     doors:   { code: 'Title', floor: 'Verdieping', fr: 'Van', to: 'Naar', arch: 'CodeArchitect', type: 'DeurType', size: 'Maat', lock: 'SlotBadge', key: 'SleutelNr', checked: 'Gecontroleerd', note: 'Opmerking', oldCode: 'OudeCode' },
     meters:  { nr: 'Title', unit: 'IstaUnit', istaCode: 'IstaCode', istaRoom: 'IstaRuimte', old: 'OudeStand', new: 'NieuweStand', units: 'Verbruik', room: 'RuimteCode', note: 'Opmerking' },
     orgs:    { name: 'Title', color: 'Kleur', type: 'Soort' },
-    costs:   { desc: 'Title', cat: 'Categorie', from: 'Van', to: 'Tot', amount: 'Bedrag', key: 'Sleutel', org: 'Organisatie', supplier: 'Leverancier', invoice: 'Factuurnr', meter: 'Meter', note: 'Opmerking', uid: 'Uid', entry: 'Boekstuk', bdate: 'Boekdatum', gl: 'Grootboek', src: 'Bron' },
+    costs:   { desc: 'Title', cat: 'Categorie', from: 'Van', to: 'Tot', amount: 'Bedrag', key: 'Sleutel', org: 'Organisatie', supplier: 'Leverancier', invoice: 'Factuurnr', meter: 'Meter', note: 'Opmerking', uid: 'Uid', entry: 'Boekstuk', bdate: 'Boekdatum', gl: 'Grootboek', src: 'Bron', cu: 'Kostendrager' },
     vo:      { org: 'Title', date: 'Datum', amount: 'Bedrag', desc: 'Omschrijving', rel: 'Relatie', entry: 'Boekstuk', uid: 'Uid', src: 'Bron' },
     imp:     { file: 'Title', at: 'Tijdstip', from: 'Van', to: 'Tot', lines: 'Lijnen', added: 'Nieuw', changed: 'Gewijzigd', removed: 'Verwijderd', who: 'Door', note: 'Opmerking' },
     occ:     { room: 'Title', org: 'Organisatie', from: 'Van', to: 'Tot', note: 'Opmerking' },
-    settings:{ key: 'Title', period: 'Periode', heatCost: 'Verwarmingskost', totalUnits: 'EenhedenTotaal', rentTotal: 'HuurVerdelers', meterCount: 'AantalMeters' }
+    settings:{ key: 'Title', period: 'Periode', heatCost: 'Verwarmingskost', totalUnits: 'EenhedenTotaal', rentTotal: 'HuurVerdelers', meterCount: 'AantalMeters', rules: 'Regels' }
   };
   const t = (n, type) => ({ name: n, [type || 'text']: type === 'number' ? { decimalPlaces: 'automatic' } : type === 'boolean' ? {} : type === 'choice' ? undefined : {} });
   const COLS = {
