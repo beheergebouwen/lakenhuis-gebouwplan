@@ -477,9 +477,11 @@ function ovl(c) {
   const d = Math.max(0, dnum(B) - dnum(A) + 1), tot = c.from && c.to ? dnum(c.to) - dnum(c.from) + 1 : d;
   return { A, B, f: tot > 0 ? Math.min(1, d / tot) : 1 };
 }
-const amtIn = c => (Number(c.amount) || 0) * ovl(c).f;
+// bedragen uit Exact zijn excl. btw; De Overmolen kan de btw niet aftrekken → btw-% (c.vat) komt erbovenop
+const gross = c => (Number(c.amount) || 0) * (1 + (Number(c.vat) || 0) / 100);
+const amtIn = c => gross(c) * ovl(c).f;
 function split(c) {
-  const { A, B, f } = ovl(c), w = weights(keyOf(c), A, B, c.org), T = Object.values(w).reduce((a, b) => a + b, 0), amt = (Number(c.amount) || 0) * f, out = {};
+  const { A, B, f } = ovl(c), w = weights(keyOf(c), A, B, c.org), T = Object.values(w).reduce((a, b) => a + b, 0), amt = gross(c) * f, out = {};
   if (T > 0) for (const [o, v] of Object.entries(w)) out[o] = amt * v / T;
   return out;
 }
@@ -493,8 +495,8 @@ function bindAfr() {
   $('#aPrint').onclick = () => { document.body.classList.add('print-afr'); window.print(); setTimeout(() => document.body.classList.remove('print-afr'), 500); };
   $('#aPdf').onclick = () => orgPdf($('#aPdfOrg').value);
   $('#aExp').onclick = () => { PSC = {}; const cs = costsInPeriod(), orgs = afrOrgs(cs);
-    exportCsv('Lakenhuis_afrekening_' + per.from + '_' + per.to + '.csv', ['categorie', 'omschrijving', 'leverancier', 'factuur', 'meter', 'van', 'tot', 'bedrag', 'sleutel', ...orgs],
-      cs.map(c => { const sp = split(c); return [c.cat, c.desc, c.supplier, c.invoice || c.entry, c.meter, dfmt(c.from), dfmt(c.to), amtIn(c).toFixed(2), c.key + (c.org ? ' (' + c.org + ')' : ''), ...orgs.map(o => (sp[o] || 0).toFixed(2))]; })); };
+    exportCsv('Lakenhuis_afrekening_' + per.from + '_' + per.to + '.csv', ['categorie', 'omschrijving', 'leverancier', 'factuur', 'meter', 'van', 'tot', 'bedrag excl. btw', 'btw %', 'bedrag incl. btw', 'sleutel', ...orgs],
+      cs.map(c => { const sp = split(c); return [c.cat, c.desc, c.supplier, c.invoice || c.entry, c.meter, dfmt(c.from), dfmt(c.to), ((Number(c.amount) || 0) * ovl(c).f).toFixed(2), Number(c.vat) || 0, amtIn(c).toFixed(2), c.key + (c.org ? ' (' + c.org + ')' : ''), ...orgs.map(o => (sp[o] || 0).toFixed(2))]; })); };
 }
 // afrekening per organisatie: één pagina per organisatie, via afdrukken → "Opslaan als PDF"
 function orgPdf(sel) {
@@ -504,17 +506,17 @@ function orgPdf(sel) {
   if (!list.length) { setStatus('ro', 'Geen organisaties met kosten in deze periode'); return; }
   const today = dfmt(new Date().toISOString().slice(0, 10));
   $('#afrPdf').innerHTML = list.map(o => {
-    const rows = cs.map(c => ({ c, sh: split(c)[o] || 0 })).filter(x => Math.abs(x.sh) >= 0.005), sh = rows.reduce((a, x) => a + x.sh, 0), v = vo[o] || 0, sal = sh - v, cat = {};
+    const rows = cs.map(c => ({ c, sh: split(c)[o] || 0 })).filter(x => Math.abs(x.sh) >= 0.005), sh = rows.reduce((a, x) => a + x.sh, 0), vt = rows.reduce((a, x) => a + x.sh * (Number(x.c.vat) || 0) / (100 + (Number(x.c.vat) || 0)), 0), v = vo[o] || 0, sal = sh - v, cat = {};
     rows.forEach(x => { const k = x.c.cat || 'Overige'; cat[k] = (cat[k] || 0) + x.sh; });
     return `<section class="orgpdf"><div class="ph"><div>Lakenhuis · VZW De Overmolen<h1>Afrekening gebouwkosten</h1>Periode ${dfmt(per.from)} – ${dfmt(per.to)}</div><div style="text-align:right">Organisatie<h1>${esc(o)}</h1>Opgemaakt op ${today}</div></div>
       ${SIMKEY ? `<p><b>Simulatie</b> – alle kostenlijnen (behalve 'Rechtstreeks') berekend met "${esc(SIMKEY)}". Geen definitieve afrekening.</p>` : ''}
-      <h2>Overzicht</h2><table class="sum"><tbody><tr><td>Aandeel in de kosten</td><td class="num">${eur2(sh)}</td></tr><tr><td>Betaalde voorschotten</td><td class="num">${v ? eur2(v) : '–'}</td></tr></tbody>
+      <h2>Overzicht</h2><table class="sum"><tbody><tr><td>Aandeel in de kosten (incl. btw)</td><td class="num">${eur2(sh)}</td></tr><tr><td style="padding-left:16px;font-size:90%">waarvan btw</td><td class="num" style="font-size:90%">${eur2(vt)}</td></tr><tr><td>Betaalde voorschotten</td><td class="num">${v ? eur2(v) : '–'}</td></tr></tbody>
       <tfoot><tr><th>${sal > 0.005 ? 'Te betalen' : sal < -0.005 ? 'Terug te krijgen' : 'Saldo'}</th><th class="num">${eur2(Math.abs(sal))}</th></tr></tfoot></table>
       ${rows.length ? `<h2>Per categorie</h2><table class="sum"><tbody>${Object.entries(cat).map(([k, n]) => `<tr><td>${esc(k)}</td><td class="num">${eur2(n)}</td></tr>`).join('')}</tbody></table>
       <h2>Detail kostenposten</h2><table><thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Verdeelsleutel</th><th class="num">Uw aandeel</th></tr></thead><tbody>` +
         rows.map(({ c, sh }) => `<tr><td>${esc(c.cat)}</td><td>${esc(c.desc)}${c.supplier || c.invoice ? `<br><span class="sml">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice].filter(Boolean).join(' · '))}</span>` : ''}</td><td style="white-space:nowrap">${dfmt(ovl(c).A)} – ${dfmt(ovl(c).B)}</td><td class="num">${eur2(amtIn(c))}</td><td>${esc(SIMKEY && c.key !== KEYS[3] ? SIMKEY : c.key || KDEF)}</td><td class="num">${eur2(sh)}</td></tr>`).join('') +
         `</tbody><tfoot><tr><th colspan="5">Totaal aandeel</th><th class="num">${eur2(sh)}</th></tr></tfoot></table>` : '<p>Geen kosten aangerekend in deze periode.</p>'}
-      <p class="pf">Bedragen = deel van elke kostenpost dat in de periode valt, verdeeld volgens de vermelde sleutel. Voorschotten = betalingen met boekdatum in de periode.</p></section>`;
+      <p class="pf">Bedragen incl. btw (niet aftrekbaar voor De Overmolen). Bedragen = deel van elke kostenpost dat in de periode valt, verdeeld volgens de vermelde sleutel. Voorschotten = betalingen met boekdatum in de periode.</p></section>`;
   }).join('');
   const t = document.title; document.title = 'Lakenhuis_afrekening_' + (sel || 'alle_organisaties').replace(/[^\w-]+/g, '_') + '_' + per.from + '_' + per.to;
   document.body.classList.add('print-org'); window.print();
@@ -530,7 +532,7 @@ function renderAfr() {
   $('#afrNew').innerHTML = dis ? `<b>Nieuwe kostenpost</b>
     <select id="cCat" aria-label="Categorie">${CATS.map(c => `<option>${c}</option>`).join('')}</select>
     <input id="cDesc" placeholder="Omschrijving (bv. Sibelga factuur Q1)" style="flex:2 1 200px" aria-label="Omschrijving">
-    <input id="cAmt" placeholder="Bedrag €" inputmode="decimal" style="width:110px" aria-label="Bedrag">
+    <input id="cAmt" placeholder="Bedrag € excl. btw" inputmode="decimal" style="width:140px" aria-label="Bedrag"><label>btw <select id="cVat"><option value="0">0% / incl.</option><option value="6">6%</option><option value="21">21%</option></select></label>
     <label>Van <input type="date" id="cFrom" value="${per.from}"></label><label>Tot <input type="date" id="cTo" value="${per.to}"></label>
     <select id="cKey" aria-label="Verdeelsleutel">${KEYS.map(k => `<option${k === KDEF ? ' selected' : ''}>${k}</option>`).join('')}</select>
     <select id="cOrg" aria-label="Organisatie" hidden>${ORGS.map(o => `<option>${esc(o.name)}</option>`).join('')}</select>
@@ -544,20 +546,20 @@ function renderAfr() {
       const msg = $('#cMsg'), amt = Number(String($('#cAmt').value).replace(/\s/g, '').replace(',', '.'));
       if (!$('#cDesc').value.trim() || !isFinite(amt) || !$('#cAmt').value) { msg.className = 'err'; msg.textContent = 'Geef omschrijving en bedrag in.'; return; }
       if ($('#cFrom').value > $('#cTo').value) { msg.className = 'err'; msg.textContent = "'Tot' ligt vóór 'Van'."; return; }
-      const c = { desc: $('#cDesc').value.trim(), cat: $('#cCat').value, amount: amt, from: $('#cFrom').value, to: $('#cTo').value, key: $('#cKey').value, org: $('#cKey').value === KEYS[3] ? $('#cOrg').value : '', supplier: $('#cSup').value.trim(), invoice: $('#cInv').value.trim(), meter: $('#cMeter').value.trim(), note: '' };
+      const c = { desc: $('#cDesc').value.trim(), cat: $('#cCat').value, amount: amt, vat: Number($('#cVat').value) || 0, from: $('#cFrom').value, to: $('#cTo').value, key: $('#cKey').value, org: $('#cKey').value === KEYS[3] ? $('#cOrg').value : '', supplier: $('#cSup').value.trim(), invoice: $('#cInv').value.trim(), meter: $('#cMeter').value.trim(), note: '' };
       try { msg.className = ''; msg.textContent = 'Opslaan…'; await LK.save('costs', c); COSTS.push(c); renderAfr(); setStatus('live', 'Kostenpost opgeslagen · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); }
       catch (e) { msg.className = 'err'; msg.textContent = 'Niet opgeslagen: ' + (e.status === 403 ? 'geen bewerkrechten.' : e.message); }
     };
   }
-  const cs = costsInPeriod(), orgs = afrOrgs(cs), tot = {}; let total = 0;
-  cs.forEach(c => { const sp = split(c); total += amtIn(c); for (const [o, v] of Object.entries(sp)) tot[o] = (tot[o] || 0) + v; });
+  const cs = costsInPeriod(), orgs = afrOrgs(cs), tot = {}; let total = 0, totVat = 0;
+  cs.forEach(c => { const sp = split(c); total += amtIn(c); totVat += amtIn(c) - (Number(c.amount) || 0) * ovl(c).f; for (const [o, v] of Object.entries(sp)) tot[o] = (tot[o] || 0) + v; });
   const vo = {}; VOS.filter(v => v.date && v.date >= per.from && v.date <= per.to).forEach(v => { vo[v.org] = (vo[v.org] || 0) + (Number(v.amount) || 0); });
   const sorgs = [...orgs, ...Object.keys(vo).filter(o => !orgs.includes(o))];
   const saldo = o => (tot[o] || 0) - (vo[o] || 0);
   const po = $('#aPdfOrg').value; $('#aPdfOrg').innerHTML = '<option value="">Alle organisaties</option>' + sorgs.map(o => `<option>${esc(o)}</option>`).join(''); $('#aPdfOrg').value = sorgs.includes(po) ? po : '';
   $('#afrSimNote').hidden = !SIMKEY; $('#afrSimNote').textContent = SIMKEY ? `Simulatie: alle kostenlijnen (behalve 'Rechtstreeks') berekend met "${SIMKEY}". Niets wordt opgeslagen – zet terug op 'Sleutel per kostenlijn' voor de echte afrekening.` : '';
   $('#afrCards').innerHTML = `<div class="card"><span class="k">Periode</span><span class="v" style="font-size:20px">${dfmt(per.from)} – ${dfmt(per.to)}</span><span class="k">${cs.length} kostenposten</span></div>
-    <div class="card"><span class="k">Totale kosten</span><span class="v">${eur2(total)}</span></div>` +
+    <div class="card"><span class="k">Totale kosten (incl. btw)</span><span class="v">${eur2(total)}</span><span class="k">excl. btw ${eur2(total - totVat)} · btw ${eur2(totVat)}</span></div>` +
     sorgs.map(o => `<div class="card"><span class="k"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</span><span class="v">${eur2(tot[o] || 0)}</span><span class="k">${total ? ((tot[o] || 0) / total * 100).toFixed(1) : 0}% van totaal${vo[o] ? ` · voorschot ${eur2(vo[o])}<br><b class="${saldo(o) > 0 ? 'err' : 'saved'}">${saldo(o) > 0 ? 'te betalen ' + eur2(saldo(o)) : 'terug ' + eur2(-saldo(o))}</b>` : ''}</span></div>`).join('');
   $('#tSaldo').innerHTML = sorgs.length ? `<thead><tr><th>Organisatie</th><th class="num">Aandeel kosten</th><th class="num">Betaalde voorschotten</th><th class="num">Saldo</th><th></th></tr></thead><tbody>` +
     sorgs.map(o => `<tr><td><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</td><td class="num mono">${eur2(tot[o] || 0)}</td><td class="num mono">${vo[o] ? eur2(vo[o]) : '–'}</td><td class="num mono"><b>${eur2(saldo(o))}</b></td><td>${o === 'De Overmolen' ? '<span class="empty">eigen deel / leegstand</span>' : saldo(o) > 0.005 ? '<span class="err">te betalen</span>' : saldo(o) < -0.005 ? '<span class="saved">terug te krijgen</span>' : ''}</td></tr>`).join('') +
@@ -572,12 +574,12 @@ function renderAfr() {
   }
   $('#tAfr').innerHTML = cs.length ? `<thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Sleutel</th>${orgs.map(o => `<th class="num"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</th>`).join('')}<th></th></tr></thead><tbody>` +
     cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td>${canWrite ? `<select class="ce" data-f="cat">${[...new Set([...CATS, c.cat || ''])].filter(Boolean).map(x => `<option${x === c.cat ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : esc(c.cat)}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.entry && 'boekstuk ' + c.entry, c.gl, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}${c.cu && !/^huurpat$/i.test(c.cu) ? '<br><span class="imp-warn">⚠ geen HUURPAT in Exact</span>' : ''}</td>
-      <td class="mono" style="font-size:12px;white-space:nowrap">${canWrite ? `<input type="date" class="ce" data-f="from" value="${c.from || ''}"><br><input type="date" class="ce" data-f="to" value="${c.to || ''}">` : dfmt(c.from) + '<br>' + dfmt(c.to)}</td><td class="num mono">${eur2(amtIn(c))}${ovl(c).f < 0.9999 ? `<br><span class="empty" style="font-size:10px">${Math.round(ovl(c).f * 100)}% van ${eur2(Number(c.amount) || 0)}</span>` : ''}</td><td style="font-size:12px">${canWrite ? `<select class="ce" data-f="key">${KEYS.map(k => `<option${k === (c.key || KDEF) ? ' selected' : ''}>${esc(k)}</option>`).join('')}</select>${c.key === KEYS[3] ? `<br><select class="ce" data-f="org">${ORGS.map(o => `<option${o.name === c.org ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select>` : ''}` : esc(c.key) + (c.org ? '<br><b>' + esc(c.org) + '</b>' : '')}${SIMKEY && c.key !== KEYS[3] ? '<br><span class="imp-warn">simulatie: ' + esc(SIMKEY) + '</span>' : ''}</td>
+      <td class="mono" style="font-size:12px;white-space:nowrap">${canWrite ? `<input type="date" class="ce" data-f="from" value="${c.from || ''}"><br><input type="date" class="ce" data-f="to" value="${c.to || ''}">` : dfmt(c.from) + '<br>' + dfmt(c.to)}</td><td class="num mono">${eur2(amtIn(c))}<br><span class="empty" style="font-size:10px">excl. ${eur2(Number(c.amount) || 0)} + btw ${canWrite ? `<select class="ce" data-f="vat" style="font-size:10px;padding:0">${[0, 6, 21].map(v => `<option value="${v}"${v === (Number(c.vat) || 0) ? ' selected' : ''}>${v}%</option>`).join('')}</select>` : (Number(c.vat) || 0) + '%'} = ${eur2(amtIn(c) - (Number(c.amount) || 0) * ovl(c).f)}${ovl(c).f < 0.9999 ? ` · ${Math.round(ovl(c).f * 100)}%` : ''}</span></td><td style="font-size:12px">${canWrite ? `<select class="ce" data-f="key">${KEYS.map(k => `<option${k === (c.key || KDEF) ? ' selected' : ''}>${esc(k)}</option>`).join('')}</select>${c.key === KEYS[3] ? `<br><select class="ce" data-f="org">${ORGS.map(o => `<option${o.name === c.org ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select>` : ''}` : esc(c.key) + (c.org ? '<br><b>' + esc(c.org) + '</b>' : '')}${SIMKEY && c.key !== KEYS[3] ? '<br><span class="imp-warn">simulatie: ' + esc(SIMKEY) + '</span>' : ''}</td>
       ${orgs.map(o => `<td class="num mono">${sp[o] ? eur2(sp[o]) : '–'}</td>`).join('')}<td>${canWrite ? '<button class="occdel cdel" title="Verwijderen">✕</button>' : ''}</td></tr>`; }).join('') +
     `</tbody><tfoot><tr><th colspan="3">Totaal</th><th class="num mono">${eur2(total)}</th><th></th>${orgs.map(o => `<th class="num mono">${eur2(tot[o] || 0)}</th>`).join('')}<th></th></tr></tfoot>` : '<tbody><tr><td class="empty">Nog geen kostenposten in deze periode. Voeg ze hierboven toe.</td></tr></tbody>';
   $('#tAfr').onchange = async e => {
     const el = e.target.closest('.ce'); if (!el) return; const tr = el.closest('tr'), c = COSTS.find(x => String(x._id) === tr.dataset.id); if (!c) return;
-    const f = el.dataset.f, patch = { _id: c._id, [f]: el.value };
+    const f = el.dataset.f, patch = { _id: c._id, [f]: f === 'vat' ? Number(el.value) : el.value };
     if (f === 'key') { patch.org = el.value === KEYS[3] ? (c.org || 'De Overmolen') : ''; }
     if (f === 'cat') { /* enkel categorie */ }
     if ((f === 'from' && el.value > (c.to || '9')) || (f === 'to' && el.value < (c.from || '0'))) { setStatus('ro', "'Tot' ligt vóór 'Van' – niet opgeslagen"); renderAfr(); return; }
@@ -604,7 +606,7 @@ function mapOrg(n) {
 const HDR = { date: ['EntryDate', 'Boekdatum', 'Datum'], entry: ['EntryNumber', 'Boekstuknummer', 'Boekstuk'], journal: ['JournalCodeDescriptionCode', 'Dagboek', 'Dagboekcode'],
   journalName: ['JournalCodeDescriptionDescription', 'Dagboek omschrijving'], gl: ['GLAccountCodeDescriptionCode', 'Grootboekrekening', 'Grootboek'],
   glName: ['GLAccountCodeDescriptionDescription', 'Grootboekrekening omschrijving'], desc: ['Description', 'Omschrijving'], rel: ['AccountCodeNameDescription', 'Relatie', 'Naam'],
-  amount: ['AmountDC', 'Bedrag', 'Bedrag DC'], cc: ['CostCenterCodeDescriptionDescription', 'Kostenplaats'], period: ['ReportingYearPeriod', 'Boekperiode', 'Periode'], cu: ['CostUnitCodeDescriptionCode', 'Kostendrager'] };
+  amount: ['AmountDC', 'Bedrag', 'Bedrag DC'], cc: ['CostCenterCodeDescriptionDescription', 'Kostenplaats'], period: ['ReportingYearPeriod', 'Boekperiode', 'Periode'], cu: ['CostUnitCodeDescriptionCode', 'Kostendrager'], vat: ['VATCode', 'Btw-code', 'Btw code'] };
 function decodeFile(buf) {
   const b = new Uint8Array(buf);
   if (b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf);
@@ -628,6 +630,7 @@ const numNL = s => { s = String(s).replace(/[\s\u00a0€]/g, ''); if (!s) return
 const isoD = (y, m, d) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 const lastDay = (y, m) => new Date(Date.UTC(+y, +m, 0)).getUTCDate();
 const toIso = s => { const m = String(s).match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/); if (m) return isoD(m[3], m[2], m[1]); const k = String(s).match(/^(\d{4})-(\d\d)-(\d\d)/); return k ? k[0] : ''; };
+const vatRate = code => { const s = String(code || '').trim().toUpperCase(); if (!s) return null; if (/^0/.test(s)) return 0; if (/^A?5|21/.test(s)) return 21; if (/^A?1$|^6/.test(s)) return 6; return null; };
 const okP = (a, b) => a && b && !isNaN(dnum(a)) && !isNaN(dnum(b)) && a <= b && dnum(b) - dnum(a) <= 400;
 function periodOf(desc, date) {
   let m = desc.match(/\((\d\d)-(\d\d)-(\d{4})\s*-\s*(\d\d)-(\d\d)-(\d{4})\)/);
@@ -712,7 +715,7 @@ function parseExact(text) {
   if (need.length) throw new Error('Kolommen niet gevonden (' + need.join(', ') + '). Gevonden kolommen: ' + rows[0].join(' | '));
   const get = (r, k) => ix[k] >= 0 ? (r[ix[k]] || '') : '';
   const lines = rows.slice(1).map(r => ({ date: toIso(get(r, 'date')), entry: get(r, 'entry'), journal: get(r, 'journal'), journalName: get(r, 'journalName'), gl: get(r, 'gl'), glName: get(r, 'glName'),
-    desc: get(r, 'desc'), rel: get(r, 'rel'), amount: numNL(get(r, 'amount')), cc: get(r, 'cc'), per: get(r, 'period'), cu: get(r, 'cu').trim() })).filter(l => l.date && l.entry);
+    desc: get(r, 'desc'), rel: get(r, 'rel'), amount: numNL(get(r, 'amount')), cc: get(r, 'cc'), per: get(r, 'period'), cu: get(r, 'cu').trim(), vat: get(r, 'vat').trim() })).filter(l => l.date && l.entry);
   const groups = {}; for (const l of lines) (groups[l.entry + '|' + l.gl] = groups[l.entry + '|' + l.gl] || []).push(l);
   for (const [k, ls] of Object.entries(groups)) { ls.sort((a, b) => a.desc.localeCompare(b.desc) || a.amount - b.amount); ls.forEach((l, i) => { l.uid = 'EX:' + k + '|' + (i + 1); }); }
   const costs = [], vos = [], info = {};
@@ -720,7 +723,7 @@ function parseExact(text) {
     const amt = Math.round(l.amount * 100) / 100;
     if (/^6/.test(l.gl)) {
       const [from, to, psrc] = bookPer(l), ck = catKey(l.gl, l.desc, l.rel);
-      costs.push({ uid: l.uid, entry: l.entry, bdate: l.date, gl: (l.gl + ' ' + l.glName).trim(), desc: l.desc || l.glName, supplier: l.rel, amount: amt, from, to, psrc, cat: ck.cat, key: ck.key, org: ck.org, warn: ck.warn, src: 'Exact', invoice: '', meter: '', note: '', cu: l.cu });
+      costs.push({ uid: l.uid, entry: l.entry, bdate: l.date, gl: (l.gl + ' ' + l.glName).trim(), desc: l.desc || l.glName, supplier: l.rel, amount: amt, from, to, psrc, cat: ck.cat, key: ck.key, org: ck.org, warn: ck.warn, src: 'Exact', invoice: '', meter: '', note: '', cu: l.cu, vat: vatRate(l.vat), vcode: l.vat });
       const c = costs[costs.length - 1];
       if (ix.cu >= 0 && !/^huurpat$/i.test(l.cu)) { c.on = false; c.warn = (c.warn ? c.warn + ' · ' : '') + 'Geen HUURPAT in Exact' + (l.cu ? ' (' + l.cu + ')' : '') + ' → eigenaarskost, niet in afrekening (vink aan om toch mee te nemen)'; }
       else if (OWNER_RE.test(l.desc + ' ' + l.glName) || l.gl.startsWith('6110')) c.warn = (c.warn ? c.warn + ' · ' : '') + 'HUURPAT, maar lijkt een eigenaarskost – vraag na bij de boekhouder';
@@ -733,6 +736,17 @@ function parseExact(text) {
     } else { const k = (l.journalName || l.journal) + ' · ' + l.gl + ' ' + l.glName; info[k] = info[k] || { n: 0, sum: 0 }; info[k].n++; info[k].sum += amt; }
   }
   // lijn zonder periode in de omschrijving: neem de periode van een andere lijn van hetzelfde boekstuk
+  // btw: code uit Exact (5/A5/5I = 21%, 1/A1 = 6%, 0 = 0%); niet-aftrekbare btw al apart geboekt → niets bijtellen; geen code → zoals andere facturen van dezelfde leverancier
+  for (const c of costs) { c.vsrc = c.vat == null ? '' : 'btw-code ' + c.vcode; }
+  for (const c of costs) if (/niet[\s-]*aftr/i.test(c.desc)) { c.vat = 0; c.vsrc = 'niet-aftrekbare btw, al geboekt'; costs.filter(x => x !== c && x.entry === c.entry && x.gl === c.gl).forEach(x => { x.vat = 0; x.vsrc = 'btw al apart geboekt (zie boekstuk)'; }); }
+  const coded = costs.filter(x => x.vsrc.startsWith('btw-code'));
+  const modeOf = arr => { const n = {}; arr.forEach(x => n[x.vat] = (n[x.vat] || 0) + 1); const e = Object.entries(n).sort((a, b) => b[1] - a[1])[0]; return e ? +e[0] : null; };
+  for (const c of costs) if (c.vat == null) {
+    const g4 = c.gl.slice(0, 4), s = modeOf(coded.filter(x => c.supplier && x.supplier === c.supplier && x.gl.slice(0, 4) === g4)), g = s == null ? modeOf(coded.filter(x => x.gl.slice(0, 4) === g4)) : null;
+    if (s != null) { c.vat = s; c.vsrc = 'geen code · zoals andere facturen ' + c.supplier; } else if (g != null) { c.vat = g; c.vsrc = 'geen code · zoals rekening ' + g4; }
+    else { c.vat = 0; c.vsrc = 'geen btw-code'; c.warn = (c.warn ? c.warn + ' · ' : '') + 'Btw-code onbekend – kies het btw-% (0/6/21)'; }
+  }
+  for (const c of costs) delete c.vcode;
   // (vroeger: periode uit omschrijving overnemen van hetzelfde boekstuk – vervangen door boekingsperiode Exact)
   const dates = lines.map(l => l.date).sort();
   return { lines, costs, vos, info, from: dates[0], to: dates[dates.length - 1], cc: [...new Set(lines.map(l => l.cc).filter(Boolean))] };
@@ -742,7 +756,7 @@ function diffImport(P) {
   const inR = d => d && d >= P.from && d <= P.to;
   const ec = new Map(COSTS.filter(c => c.uid).map(c => [c.uid, c])), seenC = new Set();
   for (const c of P.costs) { seenC.add(c.uid); const o = ec.get(c.uid);
-    if (!o) R.cAdd.push(c); else if (Math.abs((Number(o.amount) || 0) - c.amount) > 0.004 || (o.desc || '') !== c.desc || (o.supplier || '') !== c.supplier) R.cChg.push({ n: c, o, on: true }); else R.cSame.push(c); }
+    if (!o) R.cAdd.push(c); else if (Math.abs((Number(o.amount) || 0) - c.amount) > 0.004 || (o.desc || '') !== c.desc || (o.supplier || '') !== c.supplier || (o.vat === '' || o.vat == null) && c.vat) R.cChg.push({ n: c, o, on: true }); else R.cSame.push(c); }
   // enkel als het bestand zelf kostenlijnen bevat; nooit standaard aangevinkt (gebruiker beslist)
   if (P.costs.length) for (const o of COSTS) if (o.src === 'Exact' && o.uid && !seenC.has(o.uid) && inR(o.bdate)) R.cDel.push({ o, on: false });
   const ev = new Map(VOS.filter(v => v.uid).map(v => [v.uid, v])), seenV = new Set();
@@ -781,7 +795,7 @@ function renderImport() {
   const cRow = (c, i, kind) => `<tr class="${kind}" data-i="${i}" data-k="${kind}">
     <td><input type="checkbox" class="ion" ${c.on !== false ? 'checked' : ''}></td><td class="mono" style="font-size:12px">${dfmt(c.bdate)}<br>${esc(c.entry)}</td>
     <td class="wrap">${esc(c.desc)}<br><span class="empty" style="font-size:11px">${esc(c.supplier)} · ${esc(c.gl)}</span>${c.warn ? `<br><span class="imp-warn">⚠ ${esc(c.warn)}</span>` : ''}</td>
-    <td class="num mono">${eur2(c.amount)}</td>
+    <td class="num mono">${eur2(c.amount)}<br><select class="ivat" style="font-size:11px">${[0, 6, 21].map(v => `<option value="${v}"${v === c.vat ? ' selected' : ''}>+ btw ${v}%</option>`).join('')}</select><br><span class="empty" style="font-size:10px">${esc(c.vsrc || '')}</span></td>
     <td><select class="icat">${opt(CATS, c.cat)}</select></td>
     <td><select class="ikey">${opt(KEYS, c.key)}</select><select class="iorg" ${c.key === KEYS[3] ? '' : 'hidden'}>${opt(orgNames, c.org)}</select></td>
     <td style="white-space:nowrap"><input type="date" class="ifrom" value="${c.from}"><br><input type="date" class="ito" value="${c.to}"><br><span class="empty" style="font-size:10px">${esc(c.psrc || '')}</span></td></tr>`;
@@ -818,6 +832,7 @@ function renderImport() {
     if (t.classList.contains('icat')) { c.cat = t.value; c.key = t.value === 'Gas / verwarming' ? KEYS[1] : t.value === 'Elektriciteit eigen meter' || t.value === 'Huur / huurvermindering' ? KEYS[3] : KDEF; renderImport(); }
     if (t.classList.contains('ikey')) { c.key = t.value; if (c.key === KEYS[3] && !c.org) c.org = 'De Overmolen'; tr.querySelector('.iorg').hidden = c.key !== KEYS[3]; }
     if (t.classList.contains('iorg')) c.org = t.value;
+    if (t.classList.contains('ivat')) c.vat = Number(t.value);
     if (t.classList.contains('ifrom')) c.from = t.value;
     if (t.classList.contains('ito')) c.to = t.value;
   };
@@ -829,8 +844,8 @@ async function saveImport() {
   if (P.vos.some(v => !v.org)) { msg.className = 'err'; msg.textContent = 'Koppel eerst alle huurders aan een organisatie.'; return; }
   if (R.cAdd.some(c => c.on && c.from > c.to)) { msg.className = 'err'; msg.textContent = "Een periode heeft 'Tot' vóór 'Van'."; return; }
   const ops = [];
-  for (const c of R.cAdd) if (c.on) { const o = { ...c }; delete o.on; delete o.psrc; delete o.warn; delete o.learned; if (o.key !== KEYS[3]) o.org = ''; ops.push({ kind: 'costs', op: 'add', obj: o }); }
-  for (const x of R.cChg) if (x.on) ops.push({ kind: 'costs', op: 'upd', obj: { _id: x.o._id, amount: x.n.amount, desc: x.n.desc, supplier: x.n.supplier, gl: x.n.gl, entry: x.n.entry, bdate: x.n.bdate } });
+  for (const c of R.cAdd) if (c.on) { const o = { ...c }; delete o.on; delete o.psrc; delete o.warn; delete o.learned; delete o.vsrc; if (o.key !== KEYS[3]) o.org = ''; ops.push({ kind: 'costs', op: 'add', obj: o }); }
+  for (const x of R.cChg) if (x.on) ops.push({ kind: 'costs', op: 'upd', obj: { _id: x.o._id, vat: (x.o.vat === '' || x.o.vat == null) ? x.n.vat : Number(x.o.vat), amount: x.n.amount, desc: x.n.desc, supplier: x.n.supplier, gl: x.n.gl, entry: x.n.entry, bdate: x.n.bdate } });
   for (const x of R.cDel) if (x.on) ops.push({ kind: 'costs', op: 'del', obj: { _id: x.o._id } });
   for (const v of R.vAdd) ops.push({ kind: 'vo', op: 'add', obj: v });
   for (const x of R.vChg) if (x.on) ops.push({ kind: 'vo', op: 'upd', obj: { _id: x.o._id, amount: x.n.amount, desc: x.n.desc, org: x.n.org, date: x.n.date } });
