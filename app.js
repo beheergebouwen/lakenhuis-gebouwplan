@@ -594,7 +594,7 @@ function mapOrg(n) {
 const HDR = { date: ['EntryDate', 'Boekdatum', 'Datum'], entry: ['EntryNumber', 'Boekstuknummer', 'Boekstuk'], journal: ['JournalCodeDescriptionCode', 'Dagboek', 'Dagboekcode'],
   journalName: ['JournalCodeDescriptionDescription', 'Dagboek omschrijving'], gl: ['GLAccountCodeDescriptionCode', 'Grootboekrekening', 'Grootboek'],
   glName: ['GLAccountCodeDescriptionDescription', 'Grootboekrekening omschrijving'], desc: ['Description', 'Omschrijving'], rel: ['AccountCodeNameDescription', 'Relatie', 'Naam'],
-  amount: ['AmountDC', 'Bedrag', 'Bedrag DC'], cc: ['CostCenterCodeDescriptionDescription', 'Kostenplaats'] };
+  amount: ['AmountDC', 'Bedrag', 'Bedrag DC'], cc: ['CostCenterCodeDescriptionDescription', 'Kostenplaats'], period: ['ReportingYearPeriod', 'Boekperiode', 'Periode'] };
 function decodeFile(buf) {
   const b = new Uint8Array(buf);
   if (b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf);
@@ -631,6 +631,15 @@ function periodOf(desc, date) {
   const y = date.slice(0, 4), mo = date.slice(5, 7);
   return [isoD(y, mo, 1), isoD(y, mo, lastDay(y, mo)), 'maand van boekdatum'];
 }
+// Kost telt in de boekingsperiode van Exact (ReportingYearPeriod, bv. "2026 - 4"), niet pro rata volgens de omschrijving.
+// Zo telt een overboeking/toerekening van de boekhouder in het juiste jaar en wordt niets dubbel geteld.
+function bookPer(l) {
+  const m = String(l.per || '').match(/(20\d\d)\D+(\d{1,2})(?!\d)/);
+  let y = l.date.slice(0, 4), mo = l.date.slice(5, 7), src = 'maand van boekdatum';
+  if (m && +m[2] >= 1 && +m[2] <= 12) { y = m[1]; mo = String(+m[2]).padStart(2, '0'); src = 'boekperiode Exact'; }
+  const d = periodOf(l.desc, l.date);
+  return [isoD(y, mo, 1), isoD(y, mo, lastDay(y, mo)), src + ' ' + y + '-' + mo + (d[2] === 'uit omschrijving' ? ' · omschr. ' + d[0] + ' → ' + d[1] : '')];
+}
 function catKey(gl, desc, rel) {
   const d = (desc + ' ' + rel).toLowerCase(); let cat = 'Andere', key = KDEF, org = '', warn = '';
   if (/hovenier|passerstr|sint-joris|cellebroers/.test(desc.toLowerCase())) return { cat: 'Andere', key: KEYS[3], org: 'De Overmolen', warn: 'Andere locatie? → De Overmolen' };
@@ -658,21 +667,21 @@ function parseExact(text) {
   if (need.length) throw new Error('Kolommen niet gevonden (' + need.join(', ') + '). Gevonden kolommen: ' + rows[0].join(' | '));
   const get = (r, k) => ix[k] >= 0 ? (r[ix[k]] || '') : '';
   const lines = rows.slice(1).map(r => ({ date: toIso(get(r, 'date')), entry: get(r, 'entry'), journal: get(r, 'journal'), journalName: get(r, 'journalName'), gl: get(r, 'gl'), glName: get(r, 'glName'),
-    desc: get(r, 'desc'), rel: get(r, 'rel'), amount: numNL(get(r, 'amount')), cc: get(r, 'cc') })).filter(l => l.date && l.entry);
+    desc: get(r, 'desc'), rel: get(r, 'rel'), amount: numNL(get(r, 'amount')), cc: get(r, 'cc'), per: get(r, 'period') })).filter(l => l.date && l.entry);
   const groups = {}; for (const l of lines) (groups[l.entry + '|' + l.gl] = groups[l.entry + '|' + l.gl] || []).push(l);
   for (const [k, ls] of Object.entries(groups)) { ls.sort((a, b) => a.desc.localeCompare(b.desc) || a.amount - b.amount); ls.forEach((l, i) => { l.uid = 'EX:' + k + '|' + (i + 1); }); }
   const costs = [], vos = [], info = {};
   for (const l of lines) {
     const amt = Math.round(l.amount * 100) / 100;
     if (/^6/.test(l.gl)) {
-      const [from, to, psrc] = periodOf(l.desc, l.date), ck = catKey(l.gl, l.desc, l.rel);
+      const [from, to, psrc] = bookPer(l), ck = catKey(l.gl, l.desc, l.rel);
       costs.push({ uid: l.uid, entry: l.entry, bdate: l.date, gl: (l.gl + ' ' + l.glName).trim(), desc: l.desc || l.glName, supplier: l.rel, amount: amt, from, to, psrc, cat: ck.cat, key: ck.key, org: ck.org, warn: ck.warn, src: 'Exact', invoice: '', meter: '', note: '' });
     } else if (l.gl === '702000' && /^huur$/i.test(l.journal)) {
       vos.push({ uid: l.uid, entry: l.entry, date: l.date, rel: l.rel, org: mapOrg(l.rel), amount: -amt, desc: l.desc, src: 'Exact' });
     } else { const k = (l.journalName || l.journal) + ' · ' + l.gl + ' ' + l.glName; info[k] = info[k] || { n: 0, sum: 0 }; info[k].n++; info[k].sum += amt; }
   }
   // lijn zonder periode in de omschrijving: neem de periode van een andere lijn van hetzelfde boekstuk
-  for (const c of costs) if (c.psrc !== 'uit omschrijving') { const p = costs.find(x => x.entry === c.entry && x.psrc === 'uit omschrijving'); if (p) { c.from = p.from; c.to = p.to; c.psrc = 'zoals boekstuk ' + c.entry; } }
+  // (vroeger: periode uit omschrijving overnemen van hetzelfde boekstuk – vervangen door boekingsperiode Exact)
   const dates = lines.map(l => l.date).sort();
   return { lines, costs, vos, info, from: dates[0], to: dates[dates.length - 1], cc: [...new Set(lines.map(l => l.cc).filter(Boolean))] };
 }
