@@ -420,6 +420,7 @@ function renderOcc() {
 // ---------- afrekening: kostenposten + verdeelsleutels
 const CATS = ['Water (algemene meter)', 'Elektriciteit algemeen', 'Elektriciteit eigen meter', 'Gas / verwarming', 'Ista – opname/beheer', 'Schoonmaak', 'Herstelling / onderhoud', 'Lift', 'Keuringen / brandveiligheid', 'Verzekering', 'Afval', 'Telefoon / internet', 'Huur / huurvermindering', 'Andere'];
 const KEYS = ['m² × dagen bezetting', 'Ista-verbruik', 'Gelijke delen (huurders)', 'Rechtstreeks aan één organisatie', 'Eigen m² + gemeensch. naar aanwezigen (m²)', 'Eigen m² + gemeensch. naar aanwezigen (gelijk)', 'Bezette m² (leegstand niet aangerekend)'];
+const WAIT = 'Wacht op Ista-verdeling';   // gas (sleutel Ista-verbruik) zolang er geen verbruik is ingevuld
 const KDEF = KEYS[6];   // standaardsleutel voor huurlasten
 // gemeenschappelijk deel: per dag verdeeld over wie die dag een verhuurbare ruimte gebruikt (naar m² of gelijk); niemand aanwezig → De Overmolen
 let PSC = {}, SIMKEY = '';
@@ -447,6 +448,7 @@ function weights(key, A, B, org) {
       else for (const [o, s] of Object.entries(presentShares(A, B, false))) w[o] = (w[o] || 0) + u * s / P;
     }
     if (Object.values(w).reduce((a, b) => a + b, 0) > 0) return w;
+    return { [WAIT]: 1 };   // nog geen Ista-verbruik ingevuld: niet verdelen, wacht op de Ista-verdeling
   }
   if (key === KEYS[6] || key === KEYS[1]) {   // bezette m²: alles over wie er die dag is (naar m²); ruimten op naam van De Overmolen / leegstand betalen niets. Ook terugval voor Ista zonder gekoppelde meters
     for (const [o, s] of Object.entries(presentShares(A, B, false, true))) w[o] = (w[o] || 0) + s;
@@ -502,7 +504,7 @@ function bindAfr() {
 function orgPdf(sel) {
   PSC = {}; const cs = costsInPeriod(), vo = {};
   VOS.filter(v => v.date && v.date >= per.from && v.date <= per.to).forEach(v => { vo[v.org] = (vo[v.org] || 0) + (Number(v.amount) || 0); });
-  const all = afrOrgs(cs), list = sel ? [sel] : [...all, ...Object.keys(vo).filter(o => !all.includes(o))];
+  const all = afrOrgs(cs).filter(o => o !== WAIT), list = sel ? [sel] : [...all, ...Object.keys(vo).filter(o => !all.includes(o))];
   if (!list.length) { setStatus('ro', 'Geen organisaties met kosten in deze periode'); return; }
   const today = dfmt(new Date().toISOString().slice(0, 10));
   $('#afrPdf').innerHTML = list.map(o => {
@@ -554,16 +556,17 @@ function renderAfr() {
   const cs = costsInPeriod(), orgs = afrOrgs(cs), tot = {}; let total = 0, totVat = 0;
   cs.forEach(c => { const sp = split(c); total += amtIn(c); totVat += amtIn(c) - (Number(c.amount) || 0) * ovl(c).f; for (const [o, v] of Object.entries(sp)) tot[o] = (tot[o] || 0) + v; });
   const vo = {}; VOS.filter(v => v.date && v.date >= per.from && v.date <= per.to).forEach(v => { vo[v.org] = (vo[v.org] || 0) + (Number(v.amount) || 0); });
-  const sorgs = [...orgs, ...Object.keys(vo).filter(o => !orgs.includes(o))];
+  const sorgs = [...orgs, ...Object.keys(vo).filter(o => !orgs.includes(o))].filter(o => o !== WAIT);
   const saldo = o => (tot[o] || 0) - (vo[o] || 0);
   const po = $('#aPdfOrg').value; $('#aPdfOrg').innerHTML = '<option value="">Alle organisaties</option>' + sorgs.map(o => `<option>${esc(o)}</option>`).join(''); $('#aPdfOrg').value = sorgs.includes(po) ? po : '';
   $('#afrSimNote').hidden = !SIMKEY; $('#afrSimNote').textContent = SIMKEY ? `Simulatie: alle kostenlijnen (behalve 'Rechtstreeks') berekend met "${SIMKEY}". Niets wordt opgeslagen – zet terug op 'Sleutel per kostenlijn' voor de echte afrekening.` : '';
   $('#afrCards').innerHTML = `<div class="card"><span class="k">Periode</span><span class="v" style="font-size:20px">${dfmt(per.from)} – ${dfmt(per.to)}</span><span class="k">${cs.length} kostenposten</span></div>
     <div class="card"><span class="k">Totale kosten (incl. btw)</span><span class="v">${eur2(total)}</span><span class="k">excl. btw ${eur2(total - totVat)} · btw ${eur2(totVat)}</span></div>` +
+    (tot[WAIT] ? `<div class="card warnc"><span class="k">${WAIT}</span><span class="v">${eur2(tot[WAIT])}</span><span class="k">gas: nog niet aangerekend. Vul het Ista-verbruik in (tab Ista-meters), dan wordt het automatisch verdeeld.</span></div>` : '') +
     sorgs.map(o => `<div class="card"><span class="k"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</span><span class="v">${eur2(tot[o] || 0)}</span><span class="k">${total ? ((tot[o] || 0) / total * 100).toFixed(1) : 0}% van totaal${vo[o] ? ` · voorschot ${eur2(vo[o])}<br><b class="${saldo(o) > 0 ? 'err' : 'saved'}">${saldo(o) > 0 ? 'te betalen ' + eur2(saldo(o)) : 'terug ' + eur2(-saldo(o))}</b>` : ''}</span></div>`).join('');
   $('#tSaldo').innerHTML = sorgs.length ? `<thead><tr><th>Organisatie</th><th class="num">Aandeel kosten</th><th class="num">Betaalde voorschotten</th><th class="num">Saldo</th><th></th></tr></thead><tbody>` +
     sorgs.map(o => `<tr><td><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</td><td class="num mono">${eur2(tot[o] || 0)}</td><td class="num mono">${vo[o] ? eur2(vo[o]) : '–'}</td><td class="num mono"><b>${eur2(saldo(o))}</b></td><td>${o === 'De Overmolen' ? '<span class="empty">eigen deel / leegstand</span>' : saldo(o) > 0.005 ? '<span class="err">te betalen</span>' : saldo(o) < -0.005 ? '<span class="saved">terug te krijgen</span>' : ''}</td></tr>`).join('') +
-    `</tbody><tfoot><tr><th>Totaal</th><th class="num mono">${eur2(Object.values(tot).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(Object.values(vo).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(sorgs.reduce((a, o) => a + saldo(o), 0))}</th><th></th></tr></tfoot>` : '';
+    `</tbody><tfoot><tr><th>Totaal</th><th class="num mono">${eur2(sorgs.reduce((a, o) => a + (tot[o] || 0), 0))}</th><th class="num mono">${eur2(Object.values(vo).reduce((a, b) => a + b, 0))}</th><th class="num mono">${eur2(sorgs.reduce((a, o) => a + saldo(o), 0))}</th><th></th></tr></tfoot>` : '';
   { const V = voGrid(VOS, per.from, per.to), stc = { ok: '', anders: 'background:#fff3cd', mist: 'background:#fde2e1', niet: 'color:#aaa', later: 'color:#aaa' };
     $('#tVo').innerHTML = V.rows.length ? `<thead><tr><th>Organisatie</th>${V.months.map(m => `<th class="num">${MON[+m.slice(5, 7) - 1]}</th>`).join('')}<th class="num">Gewoonlijk</th></tr></thead><tbody>` +
       V.rows.map(r => `<tr><td><span class="swatch" style="background:${orgColor(r.o) || '#ddd'}"></span>${esc(r.o)}</td>${r.cells.map(c => `<td class="num mono" style="font-size:12px;${stc[c.st]}" title="${c.st === 'mist' ? 'Ruimte bezet, geen voorschot' : c.st === 'later' ? 'Nog niet geïmporteerd' : c.st === 'niet' ? 'Geen ruimte die maand' : ''}">${c.st === 'mist' ? '<b class="err">ontbreekt</b>' : c.st === 'later' ? '·' : c.st === 'niet' ? '–' : eur2(c.p).replace(/\s?€/, '')}</td>`).join('')}<td class="num mono">${eur2(r.usual)}</td></tr>`).join('') + '</tbody>' : '<tbody><tr><td class="empty">Nog geen voorschotten in deze periode.</td></tr></tbody>';
