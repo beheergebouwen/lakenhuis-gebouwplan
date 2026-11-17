@@ -1,0 +1,44 @@
+# Haalt elke dag de gezondheidsindex (basis 2013 = 100) op bij Statbel en bewaart nieuwe maanden in index.json.
+name: Statbel gezondheidsindex
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Index ophalen bij Statbel
+        run: |
+          python3 - <<'PY'
+          import json, re, urllib.request, datetime, html
+          U = 'https://bestat.statbel.fgov.be/bestat/api/views/d9a303dc-d393-4686-8fe2-234e03a857b8/result/EMBEDDED_HTML'
+          t = urllib.request.urlopen(urllib.request.Request(U, headers={'User-Agent': 'Mozilla/5.0'}), timeout=60).read().decode('utf-8', 'replace')
+          t = re.sub(r'\s+', ' ', html.unescape(re.sub(r'<[^>]+>', ' ', t)))
+          M = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december']
+          rx = re.compile(r'(' + '|'.join(M) + r') (\d{4}) ([\d.]+,\d+) ([\d.]+,\d+) ([\d.]+,\d+)', re.I)
+          num = lambda s: float(s.replace('.', '').replace(',', '.'))
+          new = {f"{m.group(2)}-{M.index(m.group(1).lower()) + 1:02d}": num(m.group(5)) for m in rx.finditer(t)}
+          if not new: raise SystemExit('Geen indexcijfers gevonden - controleer de Statbel-tabel')
+          for k, v in new.items():
+              if not 100 < v < 300: raise SystemExit('Onverwachte waarde ' + k + ': ' + str(v))
+          try: d = json.load(open('index.json'))
+          except Exception: d = {}
+          idx = dict(d.get('index2013', {})); before = dict(idx); idx.update(new)
+          if idx != before:
+              d = {'bron': 'Statbel - gezondheidsindex, basis 2013 = 100', 'tabel': U, 'bijgewerkt': datetime.date.today().isoformat(), 'index2013': dict(sorted(idx.items()))}
+              json.dump(d, open('index.json', 'w'), indent=1, ensure_ascii=False)
+          print(len(new), 'maanden gelezen, laatste', max(new))
+          PY
+      - name: Opslaan als er een nieuwe maand is
+        run: |
+          if ! git diff --quiet -- index.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add index.json
+            git commit -m "Gezondheidsindex bijgewerkt (Statbel)"
+            git push
+          fi
