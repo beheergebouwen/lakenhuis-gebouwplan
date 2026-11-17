@@ -204,6 +204,7 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
     <button role="tab" data-v="orgs" aria-selected="false">Organisaties</button>
     <button role="tab" data-v="occ" aria-selected="false">Bezetting</button>
     <button role="tab" data-v="afr" aria-selected="false">Afrekening</button>
+    <button role="tab" data-v="huur" aria-selected="false">Huur &amp; index</button>
   </nav>
   <label class="peil" title="Toon wie waar zat op deze datum">Peildatum <input type="date" id="peil"></label>
   <div class="status"><span class="dot" id="dot"></span><span id="statusText">Laden…</span><span id="who" style="margin-left:8px"></span><button class="btn" id="logout" hidden style="padding:2px 8px;font-size:12px">Afmelden</button></div>
@@ -287,6 +288,17 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
   <p class="empty" style="font-size:12px;margin-top:8px">Sleutels: <b>m² × dagen</b> = verhuurbare m² per dag bezetting (niet-bezette m² → De Overmolen) · <b>Ista-verbruik</b> = verbruik van de gekoppelde Ista-meters × dagen · <b>Gelijke delen</b> = gelijk over de huurders, naar rato van hun aanwezigheid · <b>Rechtstreeks</b> = volledig aan één organisatie (bv. eigen elektriciteitsmeter) · <b>Eigen m² + gemeensch. naar aanwezigen</b> = de kost wordt gesplitst volgens verhuurbare vs. gemeenschappelijke m²; het verhuurbare deel per m² × dagen (leegstand → De Overmolen), het gemeenschappelijke deel per dag over de organisaties die er die dag zijn (naar hun m² of in gelijke delen) · <b>Bezette m² (standaard)</b> = de kost wordt per dag verdeeld over de organisaties die er die dag zijn, naar hun bezette m²; lege ruimten en ruimten op naam van De Overmolen betalen niets (De Overmolen betaalt voor die ruimten enkel de Ista-meters in die ruimten).</p>
 </section>
 
+<section class="view" id="v-huur" hidden>
+  <div class="tablebar"><h2>Huur &amp; index</h2>
+    <span class="chip">Nieuwe huur = basishuur × nieuwe index ÷ basisindex · gezondheidsindex basis 2013 (Statbel) · index van de maand vóór de indexatie</span></div>
+  <div class="cards" id="huurCards"></div>
+  <div class="orgnew" id="huurNew"></div>
+  <div class="tscroll"><table id="tHuur"></table></div>
+  <h3 style="margin:22px 0 6px">Gezondheidsindex (basis 2013 = 100)</h3>
+  <div class="orgnew" id="idxNew"></div>
+  <div class="tscroll" style="max-width:420px"><table id="tIdx"></table></div>
+</section>
+
 <section class="view" id="v-orgs" hidden>
   <div class="tablebar"><h2>Organisaties</h2>
     <label>Van <input type="date" id="pFrom"></label><label>Tot <input type="date" id="pTo"></label>
@@ -302,8 +314,8 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 
 <div id="afrPdf" hidden></div>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=28"></script>
-<script src="graph.js?v=28"></script>
-<script src="app.js?v=28"></script>
+<script src="config.js?v=29"></script>
+<script src="graph.js?v=29"></script>
+<script src="app.js?v=29"></script>
 </body>
 </html>

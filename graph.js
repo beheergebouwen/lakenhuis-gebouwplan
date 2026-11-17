@@ -19,6 +19,8 @@
     vo:      { org: 'Title', date: 'Datum', amount: 'Bedrag', desc: 'Omschrijving', rel: 'Relatie', entry: 'Boekstuk', uid: 'Uid', src: 'Bron' },
     imp:     { file: 'Title', at: 'Tijdstip', from: 'Van', to: 'Tot', lines: 'Lijnen', added: 'Nieuw', changed: 'Gewijzigd', removed: 'Verwijderd', who: 'Door', note: 'Opmerking' },
     occ:     { room: 'Title', org: 'Organisatie', from: 'Van', to: 'Tot', note: 'Opmerking' },
+    rent:    { org: 'Title', from: 'Van', to: 'Tot', base: 'Beginhuur', baseIdx: 'Beginindex', idxMonth: 'Indexmaand', m2: 'M2Contract', note: 'Opmerking' },
+    idx:     { month: 'Title', value: 'Index2013', src: 'Bron' },
     settings:{ key: 'Title', period: 'Periode', heatCost: 'Verwarmingskost', totalUnits: 'EenhedenTotaal', rentTotal: 'HuurVerdelers', meterCount: 'AantalMeters', rules: 'Regels' }
   };
   const t = (n, type) => ({ name: n, [type || 'text']: type === 'number' ? { decimalPlaces: 'automatic' } : type === 'boolean' ? {} : type === 'choice' ? undefined : {} });
@@ -44,7 +46,7 @@
     if (!r.ok) { let m = r.status + ''; try { m = (await r.json()).error.message; } catch (e) {} const err = new Error(m); err.status = r.status; throw err; }
     return r.status === 204 ? null : (r.headers.get('content-type') || '').includes('json') ? r.json() : r.blob();
   }
-  const DK = { occ: { Van: 1, Tot: 1 }, costs: { Van: 1, Tot: 1 }, vo: { Datum: 1 } };
+  const DK = { occ: { Van: 1, Tot: 1 }, costs: { Van: 1, Tot: 1 }, vo: { Datum: 1 }, rent: { Van: 1, Tot: 1 } };
   const ymd = v => v ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels' }).format(new Date(v)) : '';
   const toApp = (kind, f, id) => { const o = { _id: id }; for (const [a, s] of Object.entries(MAP[kind])) o[a] = DK[kind]?.[s] ? ymd(f[s]) : (f[s] ?? (typeof f[s] === 'boolean' ? false : '')); return o; };
   const toSp = (kind, o) => { const f = {}; for (const [a, s] of Object.entries(MAP[kind])) if (a in o) f[s] = DK[kind]?.[s] ? (o[a] ? o[a] + 'T12:00:00Z' : null) : (o[a] === '' && /M2|Verbruik|Stand|kost|Eenheden|Huur|Aantal|Bedrag|Lijnen|Nieuw|Gewijzigd|Verwijderd/.test(s) ? null : o[a]); return f; };

@@ -55,8 +55,9 @@ async function boot() {
   setInterval(() => { if (!document.hidden && !document.activeElement?.closest('form,select,input,textarea')) reload().then(() => renderAll(true)); }, 60000);
 }
 async function reload(first) {
-  const [rooms, doors, meters, orgs, settings, occ, costs, vo, imp] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ', 'costs', 'vo', 'imp'].map(k => LK.load(k).catch(() => null)));
+  const [rooms, doors, meters, orgs, settings, occ, costs, vo, imp, rent, idx] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ', 'costs', 'vo', 'imp', 'rent', 'idx'].map(k => LK.load(k).catch(() => null)));
   COSTS = costs || []; VOS = (vo || []).filter(v => v.org); IMPS = imp || [];
+  RENT = (rent || []).filter(r => r.org); IDX_ITEMS = (idx || []).filter(x => x.month && x.value !== ''); IDX = Object.fromEntries(IDX_ITEMS.map(x => [x.month, Number(x.value)]));
   OCC = (occ || []).filter(o => o.room && o.org);
   if (!rooms) { setStatus('ro', 'Lijsten niet gevonden'); const n = $('#notice'); n.hidden = false; n.textContent = 'De SharePoint-lijsten bestaan nog niet. Laat IT eenmalig setup/ uitvoeren (zie handleiding).'; throw new Error('no lists'); }
   S.rooms = Object.fromEntries(rooms.map(r => [r.code, r])); S.doors = Object.fromEntries(doors.map(d => [d.code, d]));
@@ -878,9 +879,106 @@ async function saveImport() {
   } catch (er) { btn.disabled = false; msg.className = 'err'; msg.textContent = 'Niet (volledig) opgeslagen: ' + (er.status === 403 ? 'geen bewerkrechten.' : er.message) + ' Herlaad en importeer opnieuw: wat al bewaard is wordt herkend.'; }
 }
 let raf = 0;
+// ---------- Huur & index (huurprijs en indexatie, gezondheidsindex basis 2013 – Statbel)
+let RENT = [], IDX = {};
+const ym = d => d.slice(0, 7);
+const prevYm = s => { let y = +s.slice(0, 4), m = +s.slice(5, 7) - 1; if (!m) { y--; m = 12; } return y + '-' + String(m).padStart(2, '0'); };
+const MONTHS = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+const ymName = s => MONTHS[+s.slice(5, 7) - 1] + ' ' + s.slice(0, 4);
+const fmtIdx = v => v == null || v === '' ? '?' : Number(v).toLocaleString('nl-BE', { minimumFractionDigits: 2 });
+// basisindex: ingevuld, anders index van de maand vóór 'Van'
+const rentBaseIdx = r => (r.baseIdx !== '' && r.baseIdx != null) ? Number(r.baseIdx) : IDX[prevYm(r.from)];
+const rentIdxMonth = r => Number(r.idxMonth) || +r.from.slice(5, 7);
+// alle indexaties van een contractlijn tot datum D: elke verjaardag (1e van de indexmaand) na 'Van'
+function rentSteps(r, D) {
+  const out = [], bi = rentBaseIdx(r), m = rentIdxMonth(r); if (!r.from) return out;
+  for (let y = +r.from.slice(0, 4); y <= +D.slice(0, 4); y++) {
+    const A = isoD(y, m, 1); if (A <= r.from || A > D || (r.to && A > r.to)) continue;
+    const im = prevYm(A), iv = IDX[im];
+    out.push({ date: A, idxMonth: im, idx: iv, rent: iv && bi ? Number(r.base) * iv / bi : null });
+  }
+  return out;
+}
+function rentNow(r, D) {
+  const st = rentSteps(r, D), last = st[st.length - 1];
+  return { last, rent: last ? last.rent : Number(r.base) || 0, missing: last && last.rent == null };
+}
+function rentNext(r, D) {
+  const m = rentIdxMonth(r); let y = +D.slice(0, 4); let A = isoD(y, m, 1); if (A <= D) A = isoD(y + 1, m, 1);
+  if (A <= r.from) A = isoD(+r.from.slice(0, 4) + 1, m, 1);
+  return A;
+}
+function renderHuur() {
+  if (!$('#tHuur')) return;
+  const D = peil, act = RENT.filter(r => r.org && r.from && r.from <= D && (!r.to || r.to >= D));
+  const tot = act.reduce((s, r) => s + (rentNow(r, D).rent || 0), 0);
+  const soon = RENT.filter(r => r.org && (!r.to || r.to >= D)).map(r => ({ r, A: rentNext(r, D) })).filter(x => (new Date(x.A) - new Date(D)) / 864e5 <= 62);
+  const lastIdx = Object.keys(IDX).sort().pop();
+  $('#huurCards').innerHTML = `
+    <div class="card"><span class="k">Huur per maand (peildatum ${dfmt(D)})</span><span class="v">${eur2(tot)}</span><span class="k">${act.length} lopende contractlijnen</span></div>
+    <div class="card"><span class="k">Laatste index (Statbel, basis 2013)</span><span class="v">${lastIdx ? fmtIdx(IDX[lastIdx]) : '–'}</span><span class="k">${lastIdx ? ymName(lastIdx) : 'nog geen index'}</span></div>
+    <div class="card"><span class="k">Indexatie binnen 2 maanden</span><span class="v">${soon.length}</span><span class="k">${soon.map(x => esc(x.r.org) + ' – ' + dfmt(x.A)).join('<br>') || '–'}</span></div>`;
+  const orgOpt = sel => ORGS.filter(o => o.type !== 'Eigenaar').map(o => `<option${o.name === sel ? ' selected' : ''}>${esc(o.name)}</option>`).join('');
+  const rows = RENT.slice().sort((a, b) => a.org.localeCompare(b.org) || (a.from || '').localeCompare(b.from || ''));
+  const inp = (r, f, v, w, t) => canWrite ? `<input class="he" data-f="${f}" ${t ? `type="${t}"` : 'inputmode="decimal"'} value="${esc(v ?? '')}" style="width:${w}px">` : esc(v ?? '');
+  $('#tHuur').innerHTML = `<thead><tr><th>Organisatie</th><th>Van</th><th>Tot</th><th class="num">Basishuur / maand</th><th class="num">Basisindex</th><th>Indexatie in</th><th>Laatste indexatie</th><th class="num">Huur nu / maand</th><th>Volgende</th><th class="num">m² contract</th><th class="num">€/m² per jaar</th><th></th></tr></thead><tbody>` +
+    (rows.map(r => {
+      const bi = rentBaseIdx(r), n = rentNow(r, D), nx = rentNext(r, D), steps = rentSteps(r, D), on = r.from <= D && (!r.to || r.to >= D);
+      const hist = steps.filter(s => s.date >= '2025-01-01').map(s => `${dfmt(s.date)}: ${eur2(Number(r.base))} × ${fmtIdx(s.idx)} ÷ ${fmtIdx(bi)} = <b>${s.rent == null ? '? (index ' + ymName(s.idxMonth) + ' ontbreekt)' : eur2(s.rent)}</b>`).join('<br>');
+      return `<tr data-id="${r._id}"${on ? '' : ' style="opacity:.55"'}><td><span class="swatch" style="background:${orgColor(r.org) || '#ddd'}"></span>${esc(r.org)}${r.note ? `<br><span class="empty" style="font-size:11px">${esc(r.note)}</span>` : ''}</td>
+      <td>${inp(r, 'from', r.from, 125, 'date')}</td><td>${inp(r, 'to', r.to, 125, 'date')}</td>
+      <td class="num mono">${inp(r, 'base', r.base, 90)}</td>
+      <td class="num mono">${inp(r, 'baseIdx', r.baseIdx, 60)}<br><span class="empty" style="font-size:10px">${r.baseIdx === '' || r.baseIdx == null ? (bi ? 'auto: ' + fmtIdx(bi) + ' (' + ymName(prevYm(r.from)) + ')' : '⚠ index ' + ymName(prevYm(r.from)) + ' ontbreekt') : ''}</span></td>
+      <td>${canWrite ? `<select class="he" data-f="idxMonth">${MONTHS.map((mn, i) => `<option value="${i + 1}"${i + 1 === rentIdxMonth(r) ? ' selected' : ''}>${mn}</option>`).join('')}</select>` : MONTHS[rentIdxMonth(r) - 1]}</td>
+      <td class="mono" style="font-size:12px">${n.last ? dfmt(n.last.date) + '<br>index ' + ymName(n.last.idxMonth) + ': ' + fmtIdx(n.last.idx) : '<span class="empty">nog geen</span>'}</td>
+      <td class="num mono"><b>${n.missing ? '<span class="err">index ontbreekt</span>' : eur2(n.rent)}</b>${hist ? `<details style="font-size:11px;text-align:left"><summary>historiek</summary>${hist}</details>` : ''}</td>
+      <td class="mono" style="font-size:12px">${dfmt(nx)}<br><span class="empty">index ${ymName(prevYm(nx))}${IDX[prevYm(nx)] ? ': ' + fmtIdx(IDX[prevYm(nx)]) : ''}</span></td>
+      <td class="num mono">${inp(r, 'm2', r.m2, 60)}</td>
+      <td class="num mono">${Number(r.m2) > 0 ? eur2(n.rent * 12 / Number(r.m2)) : '–'}</td>
+      <td>${canWrite ? '<button class="occdel hdel" title="Verwijderen">✕</button>' : ''}</td></tr>`;
+    }).join('') || '<tr><td colspan="12" class="empty">Nog geen contracten. Voeg ze hierboven toe: basishuur + datum vanaf wanneer die geldt (begin contract, of de huur op 01/01/2025).</td></tr>') + '</tbody>';
+  $('#huurNew').innerHTML = canWrite ? `<b>Nieuwe contractlijn</b>
+    <select id="hOrg">${orgOpt('')}</select>
+    <label>Van <input type="date" id="hFrom" value="2025-01-01"></label>
+    <input id="hBase" placeholder="Basishuur € / maand" inputmode="decimal" style="width:150px">
+    <input id="hIdx" placeholder="Basisindex (leeg = auto)" inputmode="decimal" style="width:170px">
+    <label>Indexatie in <select id="hMon">${MONTHS.map((mn, i) => `<option value="${i + 1}">${mn}</option>`).join('')}</select></label>
+    <input id="hM2" placeholder="m² contract" inputmode="decimal" style="width:100px">
+    <input id="hNote" placeholder="Opmerking (bv. addendum 2025)" style="width:200px">
+    <button class="btn primary" id="hAdd">Toevoegen</button><span id="hMsg"></span>` : '';
+  const num = v => { const s = String(v ?? '').replace(/\s/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'); return s === '' ? null : Number(s); };
+  if (canWrite) $('#hAdd').onclick = async () => {
+    const o = { org: $('#hOrg').value, from: $('#hFrom').value, to: '', base: num($('#hBase').value), baseIdx: num($('#hIdx').value), idxMonth: Number($('#hMon').value), m2: num($('#hM2').value), note: $('#hNote').value.trim() };
+    if (!o.org || !o.from || !(o.base > 0)) { $('#hMsg').className = 'err'; $('#hMsg').textContent = 'Organisatie, Van en basishuur zijn verplicht'; return; }
+    try { await LK.save('rent', o); RENT.push(o); renderHuur(); setStatus('live', 'Contractlijn opgeslagen · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); }
+    catch (e) { $('#hMsg').className = 'err'; $('#hMsg').textContent = 'Niet opgeslagen: ' + e.message; }
+  };
+  $('#tHuur').onchange = async e => {
+    const el = e.target.closest('.he'); if (!el) return; const r = RENT.find(x => String(x._id) === el.closest('tr').dataset.id); if (!r) return;
+    const f = el.dataset.f, v = /from|to/.test(f) ? el.value : f === 'idxMonth' ? Number(el.value) : num(el.value);
+    if (f === 'from' && !v) { renderHuur(); return; }
+    try { await LK.save('rent', { _id: r._id, [f]: v }); r[f] = v ?? ''; renderHuur(); setStatus('live', 'Contractlijn aangepast · herberekend'); }
+    catch (er) { el.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + er.message); }
+  };
+  $('#tHuur').onclick = async e => {
+    const b = e.target.closest('.hdel'); if (!b) return; const r = RENT.find(x => String(x._id) === b.closest('tr').dataset.id); if (!r) return;
+    if (!confirm('Contractlijn ' + r.org + ' (vanaf ' + dfmt(r.from) + ') verwijderen?')) return;
+    try { await LK.remove('rent', r._id); RENT = RENT.filter(x => x !== r); renderHuur(); } catch (er) { setStatus('ro', 'Niet verwijderd: ' + er.message); }
+  };
+  // indexlijst
+  const ks = Object.keys(IDX).sort().reverse();
+  $('#tIdx').innerHTML = `<thead><tr><th>Maand</th><th class="num">Gezondheidsindex (2013 = 100)</th></tr></thead><tbody>` + ks.slice(0, 24).map(k => `<tr><td>${ymName(k)}</td><td class="num mono">${fmtIdx(IDX[k])}</td></tr>`).join('') + '</tbody>';
+  $('#idxNew').innerHTML = canWrite ? `<b>Index toevoegen</b> <input type="month" id="iMon"> <input id="iVal" placeholder="bv. 141,91" inputmode="decimal" style="width:100px"> <button class="btn" id="iAdd">Opslaan</button> <a href="https://statbel.fgov.be/nl/themas/consumptieprijsindex/gezondheidsindex" target="_blank" rel="noopener">Statbel</a> <span id="iMsg"></span>` : '';
+  if (canWrite) $('#iAdd').onclick = async () => {
+    const m = $('#iMon').value, v = num($('#iVal').value); if (!m || !(v > 0)) { $('#iMsg').className = 'err'; $('#iMsg').textContent = 'Maand en index invullen'; return; }
+    try { const ex = IDX_ITEMS.find(x => x.month === m); const o = { ...(ex ? { _id: ex._id } : {}), month: m, value: v, src: 'Manueel' }; await LK.save('idx', o); if (!ex) IDX_ITEMS.push(o); else ex.value = v; IDX[m] = v; renderHuur(); }
+    catch (e) { $('#iMsg').className = 'err'; $('#iMsg').textContent = 'Niet opgeslagen: ' + e.message; }
+  };
+}
+let IDX_ITEMS = [];
 function renderAll(keepPanel) {
   cancelAnimationFrame(raf);
-  raf = requestAnimationFrame(() => { renderPlan(); if (!keepPanel || !document.activeElement?.closest('#panel')) renderPanel(); renderRooms(); renderDoors(); renderIsta(); renderOrgs(); renderOcc(); renderAfr(); });
+  raf = requestAnimationFrame(() => { renderPlan(); if (!keepPanel || !document.activeElement?.closest('#panel')) renderPanel(); renderRooms(); renderDoors(); renderIsta(); renderOrgs(); renderOcc(); renderAfr(); renderHuur(); });
 }
 boot().catch(e => { if (e.message === 'no lists') return; console.error(e); setStatus('ro', 'Laden mislukt'); $('#notice').hidden = false; $('#notice').textContent = 'Het plan kon niet geladen worden: ' + (e.message || e) + '. Herlaad de pagina of meld je opnieuw aan.'; });
 })();
