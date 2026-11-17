@@ -58,6 +58,10 @@ async function reload(first) {
   const [rooms, doors, meters, orgs, settings, occ, costs, vo, imp, rent, idx] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ', 'costs', 'vo', 'imp', 'rent', 'idx'].map(k => LK.load(k).catch(() => null)));
   COSTS = costs || []; VOS = (vo || []).filter(v => v.org); IMPS = imp || [];
   RENT = (rent || []).filter(r => r.org); IDX_ITEMS = (idx || []).filter(x => x.month && x.value !== ''); IDX = Object.fromEntries(IDX_ITEMS.map(x => [x.month, Number(x.value)]));
+  // index.json wordt elke dag automatisch bijgewerkt vanuit Statbel (GitHub Action); ontbrekende maanden aanvullen + bewaren in LK_Index
+  try { const j = await (await fetch('index.json?t=' + Date.now(), { cache: 'no-store' })).json(); IDX_AUTO = j.index2013 || {}; IDX_UPD = j.bijgewerkt || ''; } catch (e) { IDX_AUTO = {}; }
+  for (const [k, v] of Object.entries(IDX_AUTO)) if (!(k in IDX)) IDX[k] = Number(v);
+  syncIdx();
   OCC = (occ || []).filter(o => o.room && o.org);
   if (!rooms) { setStatus('ro', 'Lijsten niet gevonden'); const n = $('#notice'); n.hidden = false; n.textContent = 'De SharePoint-lijsten bestaan nog niet. Laat IT eenmalig setup/ uitvoeren (zie handleiding).'; throw new Error('no lists'); }
   S.rooms = Object.fromEntries(rooms.map(r => [r.code, r])); S.doors = Object.fromEntries(doors.map(d => [d.code, d]));
@@ -916,7 +920,7 @@ function renderHuur() {
   const lastIdx = Object.keys(IDX).sort().pop();
   $('#huurCards').innerHTML = `
     <div class="card"><span class="k">Huur per maand (peildatum ${dfmt(D)})</span><span class="v">${eur2(tot)}</span><span class="k">${act.length} lopende contractlijnen</span></div>
-    <div class="card"><span class="k">Laatste index (Statbel, basis 2013)</span><span class="v">${lastIdx ? fmtIdx(IDX[lastIdx]) : '–'}</span><span class="k">${lastIdx ? ymName(lastIdx) : 'nog geen index'}</span></div>
+    <div class="card"><span class="k">Laatste index (Statbel, basis 2013)</span><span class="v">${lastIdx ? fmtIdx(IDX[lastIdx]) : '–'}</span><span class="k">${lastIdx ? ymName(lastIdx) : 'nog geen index'}${IDX_UPD ? ' · automatisch via Statbel (laatst bijgewerkt ' + dfmt(IDX_UPD) + ')' : ''}</span></div>
     <div class="card"><span class="k">Indexatie binnen 2 maanden</span><span class="v">${soon.length}</span><span class="k">${soon.map(x => esc(x.r.org) + ' – ' + dfmt(x.A)).join('<br>') || '–'}</span></div>`;
   const orgOpt = sel => ORGS.filter(o => o.type !== 'Eigenaar').map(o => `<option${o.name === sel ? ' selected' : ''}>${esc(o.name)}</option>`).join('');
   const rows = RENT.slice().sort((a, b) => a.org.localeCompare(b.org) || (a.from || '').localeCompare(b.from || ''));
@@ -975,7 +979,14 @@ function renderHuur() {
     catch (e) { $('#iMsg').className = 'err'; $('#iMsg').textContent = 'Niet opgeslagen: ' + e.message; }
   };
 }
-let IDX_ITEMS = [];
+let IDX_ITEMS = [], IDX_AUTO = {}, IDX_UPD = '', idxSyncing = false;
+// nieuwe Statbel-maanden ook in de SharePoint-lijst LK_Index zetten (enkel wie mag schrijven)
+async function syncIdx() {
+  if (!canWrite || idxSyncing) return; const have = new Set(IDX_ITEMS.map(x => x.month));
+  const add = Object.entries(IDX_AUTO).filter(([k]) => !have.has(k)).map(([k, v]) => ({ kind: 'idx', op: 'add', obj: { month: k, value: Number(v), src: 'Statbel (automatisch)' } }));
+  if (!add.length) return; idxSyncing = true;
+  try { await LK.batch(add); add.forEach(a => IDX_ITEMS.push(a.obj)); } catch (e) { console.warn('LK_Index niet bijgewerkt', e); } finally { idxSyncing = false; }
+}
 function renderAll(keepPanel) {
   cancelAnimationFrame(raf);
   raf = requestAnimationFrame(() => { renderPlan(); if (!keepPanel || !document.activeElement?.closest('#panel')) renderPanel(); renderRooms(); renderDoors(); renderIsta(); renderOrgs(); renderOcc(); renderAfr(); renderHuur(); });
