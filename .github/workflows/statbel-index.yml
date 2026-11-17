@@ -14,24 +14,27 @@ jobs:
       - name: Index ophalen bij Statbel
         run: |
           python3 - <<'PY'
-          import json, re, urllib.request, datetime, html
-          U = 'https://bestat.statbel.fgov.be/bestat/api/views/d9a303dc-d393-4686-8fe2-234e03a857b8/result/EMBEDDED_HTML'
-          t = urllib.request.urlopen(urllib.request.Request(U, headers={'User-Agent': 'Mozilla/5.0'}), timeout=60).read().decode('utf-8', 'replace')
-          t = re.sub(r'\s+', ' ', html.unescape(re.sub(r'<[^>]+>', ' ', t)))
-          M = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december']
-          rx = re.compile(r'(' + '|'.join(M) + r') (\d{4}) ([\d.]+,\d+) ([\d.]+,\d+) ([\d.]+,\d+)', re.I)
-          num = lambda s: float(s.replace('.', '').replace(',', '.'))
-          new = {f"{m.group(2)}-{M.index(m.group(1).lower()) + 1:02d}": num(m.group(5)) for m in rx.finditer(t)}
-          if not new: raise SystemExit('Geen indexcijfers gevonden - controleer de Statbel-tabel')
+          import json, io, zipfile, urllib.request, datetime
+          # Statbel open data: consumptieprijsindex + gezondheidsindex, alle basisjaren (TXT in ZIP)
+          U = 'https://statbel.fgov.be/sites/default/files/files/opendata/Consumptieprijsindex%20en%20gezondheidsindex/CPI%20All%20base%20years.zip'
+          z = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(U, timeout=120).read()))
+          txt = z.read([n for n in z.namelist() if n.lower().endswith('.txt')][0]).decode('utf-8-sig', 'replace')
+          rows = [l.split('|') for l in txt.splitlines() if l.strip()]; h = rows[0]; I = {k: i for i, k in enumerate(h)}
+          new = {}
+          for r in rows[1:]:
+              if len(r) < len(h) or r[I['NM_BASE_YR']] != '2013' or r[I['MS_HLTH_IDX']] in ('.', ''): continue
+              k = f"{int(r[I['NM_YR']])}-{int(r[I['NM_MTH']]):02d}"
+              if k >= '2018-01': new[k] = round(float(r[I['MS_HLTH_IDX']]), 2)
+          if len(new) < 12: raise SystemExit('Te weinig indexcijfers gevonden - controleer het Statbel-bestand')
           for k, v in new.items():
-              if not 100 < v < 300: raise SystemExit('Onverwachte waarde ' + k + ': ' + str(v))
+              if not 90 < v < 300: raise SystemExit('Onverwachte waarde ' + k + ': ' + str(v))
           try: d = json.load(open('index.json'))
           except Exception: d = {}
           idx = dict(d.get('index2013', {})); before = dict(idx); idx.update(new)
           if idx != before:
-              d = {'bron': 'Statbel - gezondheidsindex, basis 2013 = 100', 'tabel': U, 'bijgewerkt': datetime.date.today().isoformat(), 'index2013': dict(sorted(idx.items()))}
+              d = {'bron': 'Statbel open data - gezondheidsindex, basis 2013 = 100', 'bestand': U, 'bijgewerkt': datetime.date.today().isoformat(), 'index2013': dict(sorted(idx.items()))}
               json.dump(d, open('index.json', 'w'), indent=1, ensure_ascii=False)
-          print(len(new), 'maanden gelezen, laatste', max(new))
+          print(len(new), 'maanden gelezen, laatste', max(new), '=', new[max(new)])
           PY
       - name: Opslaan als er een nieuwe maand is
         run: |
