@@ -327,7 +327,26 @@ function renderIsta() {
     try { await save('meters', nr, body); S.meters[nr] = body; renderAll(true); } catch (er) { s.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); } };
   $('#tIsta').onclick = e => { const b = e.target.closest('[data-go]'); if (b) select(b.dataset.go); };
 }
+function orgUse(n) {
+  const has = s => String(s || '').split(' + ').includes(n), u = [];
+  const c = (k, l) => l && u.push(l + ' ' + k);
+  c('ruimte(n)', Object.values(S.rooms).filter(r => r.org === n).length);
+  c('bezettingslijn(en)', OCC.filter(o => o.org === n).length);
+  c('huurlijn(en)', RENT.filter(r => r.org === n).length);
+  c('kost(en)', COSTS.filter(x => has(x.org)).length);
+  c('voorschot(ten)', VOS.filter(v => v.org === n).length);
+  return u;
+}
 function bindOrgColors() {
+  $('#tOrgs').onclick = async e => {
+    const b = e.target.closest('.odel'); if (!b) return; const o = ORGS.find(x => x.name === b.closest('tr').dataset.org); if (!o) return;
+    const u = orgUse(o.name);
+    if (o.type === 'Eigenaar') { setStatus('ro', o.name + ' is de eigenaar en kan niet verwijderd worden'); return; }
+    if (u.length) { setStatus('ro', o.name + ' niet verwijderd: nog gekoppeld aan ' + u.join(', ') + '. Vertrekt de huurder? Geef dan een einddatum (Tot) in Bezetting en Huur & index.'); return; }
+    if (!confirm('Organisatie ' + o.name + ' verwijderen?')) return;
+    try { await LK.remove('orgs', o._id); ORGS = ORGS.filter(x => x !== o); refreshOrgUI(); renderAll(true); setStatus('live', o.name + ' verwijderd'); }
+    catch (er) { setStatus('ro', 'Niet verwijderd: ' + (er.status === 403 ? 'geen bewerkrechten.' : er.message)); }
+  };
   $('#tOrgs').onchange = e => { const inp = e.target.closest('input.ocol'); if (!inp) return; const o = ORGS.find(x => x.name === inp.closest('tr').dataset.org); if (o) saveOrg({ ...o, color: inp.value }, null); };
 }
 function renderOrgs() {
@@ -361,11 +380,11 @@ function renderOrgs() {
     msg.className = ''; msg.textContent = 'Opslaan…';
     await saveOrg({ name, color: $('#noColor').value, type: $('#noType').value }, msg);
   };
-  $('#tOrgs').innerHTML = `<thead><tr><th>Organisatie</th><th class="num">Ruimten in periode</th><th class="num">Nu (${dfmt(peil)})</th><th class="num">Gem. privatief m²</th><th>Aandeel</th><th class="num">Aandeel gemeensch. m²</th><th class="num">Totaal m²</th><th class="num">Verwarming Ista ${esc(S.settings.period || '')}</th></tr></thead><tbody>` +
+  $('#tOrgs').innerHTML = `<thead><tr><th>Organisatie</th><th class="num">Ruimten in periode</th><th class="num">Nu (${dfmt(peil)})</th><th class="num">Gem. privatief m²</th><th>Aandeel</th><th class="num">Aandeel gemeensch. m²</th><th class="num">Totaal m²</th><th class="num">Verwarming Ista ${esc(S.settings.period || '')}</th>${canWrite ? '<th></th>' : ''}</tr></thead><tbody>` +
     rows.map(x => `<tr data-org="${esc(x.o.name)}"><td><input type="color" class="ocol" value="${esc(x.o.color)}" ${dis} title="Kleur wijzigen" aria-label="Kleur ${esc(x.o.name)}"> ${esc(x.o.name)} <span class="empty" style="font-size:11px">${esc(x.o.type || '')}</span></td><td class="num">${x.n}</td><td class="num">${x.now}</td><td class="num mono">${m2f(x.avg)}</td>
       <td style="min-width:140px"><div class="bar"><span style="width:${(x.share * 100).toFixed(1)}%;background:${x.o.color}"></span></div><span class="mono" style="font-size:12px">${(x.share * 100).toFixed(2)}%</span></td>
-      <td class="num mono">${m2f(x.com)}</td><td class="num mono">${m2f(x.avg + x.com)}</td><td class="num mono">${x.heat ? eur(x.heat) : '–'}</td></tr>`).join('') +
-    `</tbody><tfoot><tr><th>Leegstand</th><th></th><th></th><th class="num mono">${m2f(vacant)}</th><th class="mono" style="font-size:12px">${privTot ? (vacant / privTot * 100).toFixed(2) : 0}%</th><th></th><th></th><th></th></tr></tfoot>`;
+      <td class="num mono">${m2f(x.com)}</td><td class="num mono">${m2f(x.avg + x.com)}</td><td class="num mono">${x.heat ? eur(x.heat) : '–'}</td>${canWrite ? `<td>${x.o.type === 'Eigenaar' ? '' : `<button class="occdel odel" title="${orgUse(x.o.name).length ? 'Kan niet: nog gekoppeld aan ' + esc(orgUse(x.o.name).join(', ')) : 'Organisatie verwijderen'}"${orgUse(x.o.name).length ? ' style="opacity:.35"' : ''}>✕</button>`}</td>` : ''}</tr>`).join('') +
+    `</tbody><tfoot><tr><th>Leegstand</th><th></th><th></th><th class="num mono">${m2f(vacant)}</th><th class="mono" style="font-size:12px">${privTot ? (vacant / privTot * 100).toFixed(2) : 0}%</th><th></th><th></th><th></th>${canWrite ? '<th></th>' : ''}</tr></tfoot>`;
 }
 // ---------- bezetting per periode (tijdlijn + tabel)
 // jaarkeuze (kalenderjaar) in Organisaties, Bezetting en Afrekening
