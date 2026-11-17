@@ -19,7 +19,7 @@
     vo:      { org: 'Title', date: 'Datum', amount: 'Bedrag', desc: 'Omschrijving', rel: 'Relatie', entry: 'Boekstuk', uid: 'Uid', src: 'Bron' },
     imp:     { file: 'Title', at: 'Tijdstip', from: 'Van', to: 'Tot', lines: 'Lijnen', added: 'Nieuw', changed: 'Gewijzigd', removed: 'Verwijderd', who: 'Door', note: 'Opmerking' },
     occ:     { room: 'Title', org: 'Organisatie', from: 'Van', to: 'Tot', note: 'Opmerking' },
-    rent:    { org: 'Title', from: 'Van', to: 'Tot', base: 'Beginhuur', baseIdx: 'Beginindex', idxMonth: 'Indexmaand', m2: 'M2Contract', note: 'Opmerking' },
+    rent:    { org: 'Title', from: 'Van', to: 'Tot', base: 'Beginhuur', baseIdx: 'Beginindex', idxMonth: 'Indexmaand', m2: 'M2Contract', note: 'Opmerking', email: 'Email' },
     idx:     { month: 'Title', value: 'Index2013', src: 'Bron' },
     settings:{ key: 'Title', period: 'Periode', heatCost: 'Verwarmingskost', totalUnits: 'EenhedenTotaal', rentTotal: 'HuurVerdelers', meterCount: 'AantalMeters', rules: 'Regels' }
   };
@@ -112,6 +112,15 @@
         out.push(...r.responses); onStep && onStep(Math.min(i + 20, ops.length), ops.length);
       }
       return out;
+    },
+    async mailDraft({ to, subject, html, att }) {     // concept in Outlook van de aangemelde gebruiker (aparte toestemming Mail.ReadWrite)
+      const sc = { scopes: ['Mail.ReadWrite'], account };
+      let tk; try { tk = (await msal.acquireTokenSilent(sc)).accessToken; } catch (e) { tk = (await msal.acquireTokenPopup(sc)).accessToken; }
+      const body = { subject, body: { contentType: 'HTML', content: html }, toRecipients: String(to || '').split(/[;,\s]+/).filter(Boolean).map(a => ({ emailAddress: { address: a } })),
+        attachments: (att || []).map(a => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: a.name, contentType: 'application/pdf', contentBytes: a.b64 })) };
+      const r = await fetch('https://graph.microsoft.com/v1.0/me/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) { let m = r.status + ''; try { m = (await r.json()).error.message; } catch (e) {} throw new Error(m); }
+      return r.json();
     },
     logout() { msal.logoutRedirect({ account }); },
     get siteId() { return siteId; }

@@ -912,6 +912,72 @@ function rentNext(r, D) {
   if (A <= r.from) A = isoD(+r.from.slice(0, 4) + 1, m, 1);
   return A;
 }
+// ---------- Indexatiebrief (PDF + Outlook-concept)
+function letterData(org, D, today) {
+  const lines = RENT.filter(r => r.org === org && r.from && r.from <= D && (!r.to || r.to >= D));
+  let A = ''; lines.forEach(r => { const n = rentNow(r, D); if (n.last && n.last.date > A) A = n.last.date; });
+  if (!A) return null;
+  const rows = lines.map(r => {
+    const st = rentSteps(r, D), i = st.findIndex(s => s.date === A), s = st[i];
+    if (!s) return { r, changed: false, now: rentNow(r, D).rent };
+    return { r, changed: true, s, bi: rentBaseIdx(r), old: i > 0 ? st[i - 1].rent : Number(r.base), now: s.rent };
+  });
+  if (rows.some(x => x.changed && x.now == null)) return { org, A, missing: true };
+  const r2 = v => Math.round(v * 100) / 100;
+  const total = r2(rows.reduce((s, x) => s + r2(x.now || 0), 0));
+  const diffM = r2(rows.filter(x => x.changed).reduce((s, x) => s + r2(x.now) - r2(x.old), 0));
+  const t = today || ymd(new Date());
+  const nM = Math.max(0, (+t.slice(0, 4) - +A.slice(0, 4)) * 12 + (+t.slice(5, 7) - +A.slice(5, 7)) + 1);
+  const email = (lines.find(x => x.email) || {}).email || '';
+  return { org, A, rows, total, diffM, nM, diffTot: r2(diffM * nM), email, today: t };
+}
+function letterPdf(L) {
+  const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+  const e = v => '€ ' + Number(v).toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const ix = v => Number(v).toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  let y = 22; const X = 22, W = 166;
+  const p = (s, o = {}) => { doc.setFont('helvetica', o.b ? 'bold' : 'normal'); doc.setFontSize(o.s || 11); const ls = doc.splitTextToSize(s, o.w || W); doc.text(ls, o.x || X, y, o.r ? { align: 'right' } : undefined); y += ls.length * (o.lh || 5.4); };
+  p('VZW De Overmolen', { b: 1, s: 13 }); p('Boekhouding', { s: 10 });
+  y = 55; const ad = ['Lakensestraat 76', '1000 Brussel']; p(L.org, { b: 1, x: 118, w: 70 }); ad.forEach(a => p(a, { x: 118, w: 70 }));
+  y = 85; p('Brussel, ' + dfmt(L.today));
+  y += 6; p('Betreft: indexatie huurprijs – ' + ymName(L.A.slice(0, 7)), { b: 1 });
+  y += 4; p('Geachte,');
+  y += 2; p(`Vanaf ${ymName(L.A.slice(0, 7))} werd de huur aangepast aan de nieuwe index. Deze aanpassing werd berekend volgens onderstaande formule (gezondheidsindex, basis 2013):`);
+  y += 2; p('Basishuurprijs × nieuwe index ÷ oorspronkelijke index', { b: 1 });
+  y += 3;
+  L.rows.filter(x => x.changed).forEach(x => {
+    if (L.rows.length > 1) p((x.r.note ? x.r.note : 'Contract vanaf ' + dfmt(x.r.from)) + (Number(x.r.m2) ? ` (${String(x.r.m2).replace('.', ',')} m2)` : ''), { s: 10 });
+    p(`${e(x.r.base)} × ${ix(x.s.idx)} (${ymName(x.s.idxMonth)}) ÷ ${ix(x.bi)} = ${e(x.now)} per maand`, { b: 1, x: X + 6 });
+    p(`Vorige huur: ${e(x.old)} per maand`, { s: 10, x: X + 6 }); y += 2;
+  });
+  L.rows.filter(x => !x.changed).forEach(x => { p(`${x.r.note || 'Contract vanaf ' + dfmt(x.r.from)}: ongewijzigd ${e(x.now)} per maand`, { s: 10 }); y += 1; });
+  y += 1; doc.setDrawColor(150); doc.line(X, y, X + W, y); y += 6;
+  p(`Nieuwe huur per maand: ${e(L.total)}`, { b: 1 });
+  if (L.nM > 0 && L.diffM > 0) p(`Verschil per maand: ${e(L.diffM)} – voor ${L.nM} maand(en) (${ymName(L.A.slice(0, 7))} t.e.m. ${ymName(L.today.slice(0, 7))}): ${e(L.diffTot)}`, { s: 10 });
+  y += 5; p('Gelieve Uw bestendige opdracht aan te passen aan de nieuwe huur, en het verschil van de vorige maand(en) apart over te schrijven.');
+  y += 3; p('Rekeningnummer IBAN: BE92 0682 4007 4623'); p('BTW-nr: BE 0447.508.015');
+  y += 8; p('Met vriendelijke groeten,'); y += 10; p('Boekhouding VZW De Overmolen', { b: 1 });
+  return doc;
+}
+async function sendLetter(org, btn) {
+  const L = letterData(org, peil);
+  if (!L) { setStatus('ro', org + ': nog geen indexatie vóór ' + dfmt(peil)); return; }
+  if (L.missing) { setStatus('ro', org + ': index ontbreekt – vul eerst de index in'); return; }
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '…';
+  try {
+    if (!window.jspdf) await new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'; s.onload = ok; s.onerror = () => no(new Error('PDF-bibliotheek niet geladen')); document.head.appendChild(s); });
+    const doc = letterPdf(L), name = `Indexatie huur ${org} ${L.A.slice(0, 7)}.pdf`.replace(/[\\/:*?"<>|]/g, '-');
+    const b64 = doc.output('datauristring').split(',')[1];
+    const e = v => '€ ' + Number(v).toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const html = `<p>Geachte,</p><p>In bijlage vindt u de brief over de indexatie van de huur vanaf ${ymName(L.A.slice(0, 7))}.</p><p>Nieuwe huur per maand: <b>${e(L.total)}</b>.</p><p>Gelieve uw bestendige opdracht aan te passen en het verschil van de vorige maand(en) apart over te schrijven op BE92 0682 4007 4623.</p><p>Met vriendelijke groeten,<br>Boekhouding VZW De Overmolen</p>`;
+    let m;
+    try { m = await LK.mailDraft({ to: L.email, subject: `Indexatie huur ${org} – ${ymName(L.A.slice(0, 7))}`, html, att: [{ name, b64 }] }); }
+    catch (er) { doc.save(name); throw new Error('Outlook-concept niet gemaakt (' + er.message + '). De PDF is gedownload.'); }
+    if (m && m.webLink) window.open(m.webLink, '_blank', 'noopener');
+    setStatus('live', 'Concept in Outlook gemaakt voor ' + org + (L.email ? '' : ' – vul nog het e-mailadres in'));
+  } catch (er) { setStatus('ro', er.message); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
 function renderHuur() {
   if (!$('#tHuur')) return;
   const D = peil, act = RENT.filter(r => r.org && r.from && r.from <= D && (!r.to || r.to >= D));
@@ -926,11 +992,12 @@ function renderHuur() {
   const orgOpt = sel => ORGS.filter(o => o.type !== 'Eigenaar').map(o => `<option${o.name === sel ? ' selected' : ''}>${esc(o.name)}</option>`).join('');
   const rows = RENT.slice().sort((a, b) => a.org.localeCompare(b.org) || (a.from || '').localeCompare(b.from || ''));
   const inp = (r, f, v, w, t) => canWrite ? `<input class="he" data-f="${f}" ${t ? `type="${t}"` : 'inputmode="decimal"'} value="${esc(v ?? '')}" style="width:${w}px">` : esc(v ?? '');
+  const firstOf = new Set();
   $('#tHuur').innerHTML = `<thead><tr><th>Organisatie</th><th>Van</th><th>Tot</th><th class="num">Basishuur / maand</th><th class="num">Basisindex</th><th>Indexatie in</th><th>Laatste indexatie</th><th class="num">Huur nu / maand</th><th>Volgende</th><th class="num">m² contract</th><th class="num">€/m² per jaar</th><th></th></tr></thead><tbody>` +
     (rows.map(r => {
       const bi = rentBaseIdx(r), n = rentNow(r, D), nx = rentNext(r, D), steps = rentSteps(r, D), on = r.from <= D && (!r.to || r.to >= D);
       const hist = steps.filter(s => s.date >= '2025-01-01').map(s => `${dfmt(s.date)}: ${eur2(Number(r.base))} × ${fmtIdx(s.idx)} ÷ ${fmtIdx(bi)} = <b>${s.rent == null ? '? (index ' + ymName(s.idxMonth) + ' ontbreekt)' : eur2(s.rent)}</b>`).join('<br>');
-      return `<tr data-id="${r._id}"${on ? '' : ' style="opacity:.55"'}><td><span class="swatch" style="background:${orgColor(r.org) || '#ddd'}"></span>${esc(r.org)}${r.note ? `<br><span class="empty" style="font-size:11px">${esc(r.note)}</span>` : ''}</td>
+      return `<tr data-id="${r._id}"${on ? '' : ' style="opacity:.55"'}><td><span class="swatch" style="background:${orgColor(r.org) || '#ddd'}"></span>${esc(r.org)}${r.note ? `<br><span class="empty" style="font-size:11px">${esc(r.note)}</span>` : ''}${canWrite && on ? `<br><input class="he" data-f="email" type="email" placeholder="e-mail huurder" value="${esc(r.email || '')}" style="width:170px;font-size:11px">${firstOf.has(r.org) ? '' : (firstOf.add(r.org), ' <button class="btn hbrief" style="font-size:11px" title="Indexatiebrief als PDF in een Outlook-concept">✉ Brief</button>')}` : ''}</td>
       <td>${inp(r, 'from', r.from, 125, 'date')}</td><td>${inp(r, 'to', r.to, 125, 'date')}</td>
       <td class="num mono">${inp(r, 'base', r.base, 90)}</td>
       <td class="num mono">${inp(r, 'baseIdx', r.baseIdx, 60)}<br><span class="empty" style="font-size:10px">${r.baseIdx === '' || r.baseIdx == null ? (bi ? 'auto: ' + fmtIdx(bi) + ' (' + ymName(prevYm(r.from)) + ')' : '⚠ index ' + ymName(prevYm(r.from)) + ' ontbreekt') : ''}</span></td>
@@ -960,12 +1027,13 @@ function renderHuur() {
   };
   $('#tHuur').onchange = async e => {
     const el = e.target.closest('.he'); if (!el) return; const r = RENT.find(x => String(x._id) === el.closest('tr').dataset.id); if (!r) return;
-    const f = el.dataset.f, v = /from|to/.test(f) ? el.value : f === 'idxMonth' ? Number(el.value) : num(el.value);
+    const f = el.dataset.f, v = f === 'email' ? el.value.trim() : /from|to/.test(f) ? el.value : f === 'idxMonth' ? Number(el.value) : num(el.value);
     if (f === 'from' && !v) { renderHuur(); return; }
     try { await LK.save('rent', { _id: r._id, [f]: v }); r[f] = v ?? ''; renderHuur(); setStatus('live', 'Contractlijn aangepast · herberekend'); }
     catch (er) { el.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + er.message); }
   };
   $('#tHuur').onclick = async e => {
+    const lb = e.target.closest('.hbrief'); if (lb) { const r = RENT.find(x => String(x._id) === lb.closest('tr').dataset.id); if (r) sendLetter(r.org, lb); return; }
     const b = e.target.closest('.hdel'); if (!b) return; const r = RENT.find(x => String(x._id) === b.closest('tr').dataset.id); if (!r) return;
     if (!confirm('Contractlijn ' + r.org + ' (vanaf ' + dfmt(r.from) + ') verwijderen?')) return;
     try { await LK.remove('rent', r._id); RENT = RENT.filter(x => x !== r); renderHuur(); } catch (er) { setStatus('ro', 'Niet verwijderd: ' + er.message); }
