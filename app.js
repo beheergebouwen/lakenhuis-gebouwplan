@@ -939,7 +939,9 @@ const ymName = s => MONTHS[+s.slice(5, 7) - 1] + ' ' + s.slice(0, 4);
 const fmtIdx = v => v == null || v === '' ? '?' : Number(v).toLocaleString('nl-BE', { minimumFractionDigits: 2 });
 // basisindex: ingevuld, anders index van de maand vóór 'Van'
 const rentBaseIdx = r => (r.baseIdx !== '' && r.baseIdx != null) ? Number(r.baseIdx) : IDX[prevYm(r.from)];
-const rentIdxMonth = r => Number(r.idxMonth) || +r.from.slice(5, 7);
+// addendum ('Addendum bij' = hoofdcontract): wordt samen met het hoofdcontract geïndexeerd, in dezelfde maand
+const rentPar = r => r && r.parent ? RENT.find(x => x !== r && String(x._id) === String(r.parent) && !x.parent) || null : null;
+const rentIdxMonth = r => { const p = rentPar(r) || r; return Number(p.idxMonth) || +(p.from || r.from).slice(5, 7); };
 // alle indexaties van een contractlijn tot datum D: elke verjaardag (1e van de indexmaand) na 'Van'
 function rentSteps(r, D) {
   const out = [], bi = rentBaseIdx(r), m = rentIdxMonth(r); if (!r.from) return out;
@@ -1037,27 +1039,37 @@ function renderHuur() {
     ${(() => { const need = prevYm(ymd(new Date())); return IDX[need] ? '' : `<div class="card" style="border-color:var(--warn)"><span class="k">⚠ Index ontbreekt</span><span class="v" style="font-size:18px">${ymName(need)}</span><span class="k">Statbel publiceert de index eind van de maand. Zoek de gezondheidsindex (basis 2013) op en vul hem onderaan in. <a href="https://statbel.fgov.be/nl/themas/consumptieprijsindex/gezondheidsindex" target="_blank" rel="noopener">Statbel openen</a></span></div>`; })()}
     <div class="card"><span class="k">Indexatie binnen 2 maanden</span><span class="v">${soon.length}</span><span class="k">${soon.map(x => esc(x.r.org) + ' – ' + dfmt(x.A) + (IDX[prevYm(x.A)] ? '' : ' <span class="err">(index ' + ymName(prevYm(x.A)) + ' nodig)</span>')).join('<br>') || '–'}</span></div>`;
   const orgOpt = sel => ORGS.filter(o => o.type !== 'Eigenaar').map(o => `<option${o.name === sel ? ' selected' : ''}>${esc(o.name)}</option>`).join('');
-  const rows = RENT.slice().sort((a, b) => a.org.localeCompare(b.org) || (a.from || '').localeCompare(b.from || ''));
+  const byFrom = (a, b) => (a.from || '').localeCompare(b.from || '');
+  const mains = RENT.filter(r => !rentPar(r)).sort((a, b) => a.org.localeCompare(b.org) || byFrom(a, b)), rows = [];
+  mains.forEach(m => { rows.push(m); RENT.filter(x => rentPar(x) === m).sort(byFrom).forEach(x => rows.push(x)); });
+  const isOn = r => r.from && r.from <= D && (!r.to || r.to >= D);
+  const lastOf = {}; rows.forEach((r, i) => { lastOf[r.org] = i; });
+  const subRow = org => { const ls = rows.filter(r => r.org === org && isOn(r)); if (ls.length < 2) return '';
+    const t = ls.reduce((s, r) => s + Math.round((rentNow(r, D).rent || 0) * 100) / 100, 0), m2 = ls.reduce((s, r) => s + (Number(r.m2) || 0), 0);
+    return `<tr class="hsub" style="background:var(--paper2,#f4f3ef)"><td colspan="7" style="text-align:right"><b>Totaal ${esc(org)}</b> <span class="empty">(${ls.length} lopende lijnen)</span></td><td class="num mono"><b>${eur2(t)}</b></td><td></td><td class="num mono">${m2 ? String(Math.round(m2 * 100) / 100).replace('.', ',') : ''}</td><td class="num mono">${m2 ? eur2(t * 12 / m2) : '–'}</td><td></td></tr>`; };
+  const parSel = r => { const ms = mains.filter(m => m !== r && m.org === r.org); if (!canWrite || (!ms.length && !rentPar(r))) return '';
+    return `<br><label style="font-size:11px">Addendum bij <select class="he" data-f="parent" style="font-size:11px;max-width:190px"><option value="">— (hoofdcontract)</option>${ms.map(m => `<option value="${m._id}"${String(r.parent) === String(m._id) ? ' selected' : ''}>${esc((m.note ? m.note.split(/[.;:]/)[0] : 'Contract') + ' · vanaf ' + dfmt(m.from))}</option>`).join('')}</select></label>`; };
   const inp = (r, f, v, w, t) => canWrite ? `<input class="he" data-f="${f}" ${t ? `type="${t}"` : 'inputmode="decimal"'} value="${esc(v ?? '')}" style="width:${w}px">` : esc(v ?? '');
   const firstOf = new Set();
   $('#tHuur').innerHTML = `<thead><tr><th>Organisatie</th><th>Van</th><th>Tot</th><th class="num">Basishuur / maand</th><th class="num">Basisindex</th><th>Indexatie in</th><th>Laatste indexatie</th><th class="num">Huur nu / maand</th><th>Volgende</th><th class="num">m² contract</th><th class="num">€/m² per jaar</th><th></th></tr></thead><tbody>` +
-    (rows.map(r => {
-      const bi = rentBaseIdx(r), n = rentNow(r, D), nx = rentNext(r, D), steps = rentSteps(r, D), on = r.from <= D && (!r.to || r.to >= D);
+    (rows.map((r, ri) => {
+      const par = rentPar(r), bi = rentBaseIdx(r), n = rentNow(r, D), nx = rentNext(r, D), steps = rentSteps(r, D), on = r.from <= D && (!r.to || r.to >= D);
       const hist = steps.filter(s => s.date >= '2025-01-01').map(s => `${dfmt(s.date)}: ${eur2(Number(r.base))} × ${fmtIdx(s.idx)} ÷ ${fmtIdx(bi)} = <b>${s.rent == null ? '? (index ' + ymName(s.idxMonth) + ' ontbreekt)' : eur2(s.rent)}</b>`).join('<br>');
-      return `<tr data-id="${r._id}"${on ? '' : ' style="opacity:.55"'}><td><span class="swatch" style="background:${orgColor(r.org) || '#ddd'}"></span>${esc(r.org)}${r.note ? `<br><span class="empty" style="font-size:11px">${esc(r.note)}</span>` : ''}${canWrite && on ? `<br><input class="he" data-f="email" type="email" placeholder="e-mail huurder" value="${esc(r.email || '')}" style="width:170px;font-size:11px">${firstOf.has(r.org) ? '' : (firstOf.add(r.org), ' <button class="btn hbrief" style="font-size:11px" title="Indexatiebrief als PDF in een Outlook-concept">✉ Brief</button>')}` : ''}</td>
+      return `<tr data-id="${r._id}"${on ? '' : ' style="opacity:.55"'}><td${par ? ' style="padding-left:22px"' : ''}>${par ? '<span class="empty">↳ addendum · </span>' : ''}<span class="swatch" style="background:${orgColor(r.org) || '#ddd'}"></span>${esc(r.org)}${r.note ? `<br><span class="empty" style="font-size:11px">${esc(r.note)}</span>` : ''}${canWrite && on ? `<br><input class="he" data-f="email" type="email" placeholder="e-mail huurder" value="${esc(r.email || '')}" style="width:170px;font-size:11px">${firstOf.has(r.org) ? '' : (firstOf.add(r.org), ' <button class="btn hbrief" style="font-size:11px" title="Indexatiebrief als PDF in een Outlook-concept">✉ Brief</button>')}` : ''}${parSel(r)}</td>
       <td>${inp(r, 'from', r.from, 125, 'date')}</td><td>${inp(r, 'to', r.to, 125, 'date')}</td>
       <td class="num mono">${inp(r, 'base', r.base, 90)}</td>
       <td class="num mono">${inp(r, 'baseIdx', r.baseIdx, 60)}<br><span class="empty" style="font-size:10px">${r.baseIdx === '' || r.baseIdx == null ? (bi ? 'auto: ' + fmtIdx(bi) + ' (' + ymName(prevYm(r.from)) + ')' : '⚠ index ' + ymName(prevYm(r.from)) + ' ontbreekt') : ''}</span></td>
-      <td>${canWrite ? `<select class="he" data-f="idxMonth">${MONTHS.map((mn, i) => `<option value="${i + 1}"${i + 1 === rentIdxMonth(r) ? ' selected' : ''}>${mn}</option>`).join('')}</select>` : MONTHS[rentIdxMonth(r) - 1]}</td>
+      <td>${par ? `${MONTHS[rentIdxMonth(r) - 1]}<br><span class="empty" style="font-size:10px">zoals hoofdcontract</span>` : canWrite ? `<select class="he" data-f="idxMonth">${MONTHS.map((mn, i) => `<option value="${i + 1}"${i + 1 === rentIdxMonth(r) ? ' selected' : ''}>${mn}</option>`).join('')}</select>` : MONTHS[rentIdxMonth(r) - 1]}</td>
       <td class="mono" style="font-size:12px">${n.last ? dfmt(n.last.date) + '<br>index ' + ymName(n.last.idxMonth) + ': ' + fmtIdx(n.last.idx) : '<span class="empty">nog geen</span>'}</td>
       <td class="num mono"><b>${n.missing ? '<span class="err">index ontbreekt</span>' : eur2(n.rent)}</b>${hist ? `<details style="font-size:11px;text-align:left"><summary>historiek</summary>${hist}</details>` : ''}</td>
       <td class="mono" style="font-size:12px">${dfmt(nx)}<br><span class="empty">index ${ymName(prevYm(nx))}${IDX[prevYm(nx)] ? ': ' + fmtIdx(IDX[prevYm(nx)]) : ''}</span></td>
       <td class="num mono">${inp(r, 'm2', r.m2, 60)}</td>
       <td class="num mono">${Number(r.m2) > 0 ? eur2(n.rent * 12 / Number(r.m2)) : '–'}</td>
-      <td>${canWrite ? '<button class="occdel hdel" title="Verwijderen">✕</button>' : ''}</td></tr>`;
+      <td>${canWrite ? '<button class="occdel hdel" title="Verwijderen">✕</button>' : ''}</td></tr>` + (lastOf[r.org] === ri ? subRow(r.org) : '');
     }).join('') || '<tr><td colspan="12" class="empty">Nog geen contracten. Voeg ze hierboven toe: basishuur + datum vanaf wanneer die geldt (begin contract, of de huur op 01/01/2025).</td></tr>') + '</tbody>';
   $('#huurNew').innerHTML = canWrite ? `<b>Nieuwe contractlijn</b>
     <select id="hOrg">${orgOpt('')}</select>
+    <label>Addendum bij <select id="hPar"><option value="">— (nieuw hoofdcontract)</option>${mains.filter(m => !m.to || m.to >= D).map(m => `<option value="${m._id}">${esc(m.org + ' · ' + (m.note ? m.note.split(/[.;:]/)[0] : 'contract') + ' · vanaf ' + dfmt(m.from))}</option>`).join('')}</select></label>
     <label>Van <input type="date" id="hFrom" value="2025-01-01"></label>
     <input id="hBase" placeholder="Basishuur € / maand" inputmode="decimal" style="width:150px">
     <input id="hIdx" placeholder="Basisindex (leeg = auto)" inputmode="decimal" style="width:170px">
@@ -1066,8 +1078,10 @@ function renderHuur() {
     <input id="hNote" placeholder="Opmerking (bv. addendum 2025)" style="width:200px">
     <button class="btn primary" id="hAdd">Toevoegen</button><span id="hMsg"></span>` : '';
   const num = v => { const s = String(v ?? '').replace(/\s/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'); return s === '' ? null : Number(s); };
+  if (canWrite) $('#hPar').onchange = () => { const m = RENT.find(x => String(x._id) === $('#hPar').value); $('#hMon').disabled = !!m; if (m) { $('#hOrg').value = m.org; $('#hMon').value = rentIdxMonth(m); } };
   if (canWrite) $('#hAdd').onclick = async () => {
-    const o = { org: $('#hOrg').value, from: $('#hFrom').value, to: '', base: num($('#hBase').value), baseIdx: num($('#hIdx').value), idxMonth: Number($('#hMon').value), m2: num($('#hM2').value), note: $('#hNote').value.trim() };
+    const pm = RENT.find(x => String(x._id) === $('#hPar').value);
+    const o = { org: pm ? pm.org : $('#hOrg').value, ...(pm ? { parent: Number(pm._id) } : {}), from: $('#hFrom').value, to: '', base: num($('#hBase').value), baseIdx: num($('#hIdx').value), idxMonth: Number($('#hMon').value), m2: num($('#hM2').value), note: $('#hNote').value.trim() };
     if (!o.org || !o.from || !(o.base > 0)) { $('#hMsg').className = 'err'; $('#hMsg').textContent = 'Organisatie, Van en basishuur zijn verplicht'; return; }
     try { await LK.save('rent', o); RENT.push(o); renderHuur(); setStatus('live', 'Contractlijn opgeslagen · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); }
     catch (e) { $('#hMsg').className = 'err'; $('#hMsg').textContent = 'Niet opgeslagen: ' + e.message; }

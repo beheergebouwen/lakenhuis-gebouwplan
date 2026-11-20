@@ -19,7 +19,7 @@
     vo:      { org: 'Title', date: 'Datum', amount: 'Bedrag', desc: 'Omschrijving', rel: 'Relatie', entry: 'Boekstuk', uid: 'Uid', src: 'Bron' },
     imp:     { file: 'Title', at: 'Tijdstip', from: 'Van', to: 'Tot', lines: 'Lijnen', added: 'Nieuw', changed: 'Gewijzigd', removed: 'Verwijderd', who: 'Door', note: 'Opmerking' },
     occ:     { room: 'Title', org: 'Organisatie', from: 'Van', to: 'Tot', note: 'Opmerking' },
-    rent:    { org: 'Title', from: 'Van', to: 'Tot', base: 'Beginhuur', baseIdx: 'Beginindex', idxMonth: 'Indexmaand', m2: 'M2Contract', note: 'Opmerking', email: 'Email' },
+    rent:    { org: 'Title', from: 'Van', to: 'Tot', base: 'Beginhuur', baseIdx: 'Beginindex', idxMonth: 'Indexmaand', m2: 'M2Contract', note: 'Opmerking', email: 'Email', parent: 'HoofdContract' },
     idx:     { month: 'Title', value: 'Index2013', src: 'Bron' },
     settings:{ key: 'Title', period: 'Periode', heatCost: 'Verwarmingskost', totalUnits: 'EenhedenTotaal', rentTotal: 'HuurVerdelers', meterCount: 'AantalMeters', rules: 'Regels' }
   };
