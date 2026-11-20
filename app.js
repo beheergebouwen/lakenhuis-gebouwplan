@@ -541,14 +541,15 @@ function rentInfo(o) {
   const rows = lines.map(r => {
     const act = r.from <= D && (!r.to || r.to >= D), n = rentNow(r, D), now = r2(n.rent || 0); if (act) tot += now;
     const lab = (r.note ? r.note.split(/[.;]/)[0] : 'Contract vanaf ' + dfmt(r.from)) + (Number(r.m2) ? ` (${String(r.m2).replace('.', ',')} m²)` : '');
-    const how = n.last ? (n.last.rent == null ? `index ${ymName(n.last.idxMonth)} ontbreekt nog` : `sinds ${dfmt(n.last.date)}: ${eur2(r.base)} × ${ix(n.last.idx)} (${ymName(n.last.idxMonth)}) ÷ ${ix(rentBaseIdx(r))}`) : `basishuur sinds ${dfmt(r.from)}, nog niet geïndexeerd`;
+    const how = n.last ? (n.last.rent == null ? `index ${ymName(n.last.idxMonth)} ontbreekt nog` : `sinds ${dfmt(n.last.date)}: ${eur2(r.base)} × <b>${ix(n.last.idx)}</b> (index ${ymName(n.last.idxMonth)}) ÷ <b>${ix(rentBaseIdx(r))}</b> (startindex)`) : `basishuur sinds ${dfmt(r.from)}, nog niet geïndexeerd`;
     const st = rentSteps(r, per.to <= D ? per.to : D).filter(s => s.date >= per.from && s.date <= per.to && s.rent != null);
     const inP = st.length ? 'Indexatie in deze periode: ' + st.map(s => `${dfmt(s.date)} → ${eur2(r2(s.rent))}`).join(', ') : '';
     const nx = act ? rentNext(r, D) : '', nxt = nx ? `Volgende indexatie: ${dfmt(nx)} (index ${ymName(prevYm(nx))})` : (r.to ? 'Contract beëindigd op ' + dfmt(r.to) : '');
-    return `<tr${act ? '' : ' style="opacity:.6"'}><td>${esc(lab)}<br><span class="sml">${esc(how)}</span>${inP ? `<br><span class="sml">${esc(inP)}</span>` : ''}${nxt ? `<br><span class="sml">${esc(nxt)}</span>` : ''}</td><td class="num">${act ? eur2(now) + ' / maand' : '–'}</td></tr>`;
+    return `<tr${act ? '' : ' style="opacity:.6"'}><td>${esc(lab)}<br><span class="sml">${how}</span>${inP ? `<br><span class="sml">${esc(inP)}</span>` : ''}${nxt ? `<br><span class="sml">${esc(nxt)}</span>` : ''}</td><td class="num">${act ? eur2(now) + ' / maand' : '–'}</td></tr>`;
   }).join('');
-  return `<h2>Huurprijs en indexatie (ter info)</h2><table class="sum"><tbody>${rows}</tbody>${lines.filter(r => r.from <= D && (!r.to || r.to >= D)).length > 1 ? `<tfoot><tr><th>Huidige huur per maand (${dfmt(D)})</th><th class="num">${eur2(r2(tot))}</th></tr></tfoot>` : ''}</table>
-    <p class="pf">Huur geïndexeerd volgens de gezondheidsindex, basis 2013 (Statbel): basishuur × nieuwe index ÷ oorspronkelijke index. Dit deel is enkel ter info en telt niet mee in de afrekening hierboven.</p>`;
+  return `<div class="rentbox" style="margin-top:16px;max-width:560px;border:1.5px solid #2f6f9f;border-left:6px solid #2f6f9f;border-radius:6px;background:#eef5fb;padding:10px 14px 6px;-webkit-print-color-adjust:exact;print-color-adjust:exact;break-inside:avoid">
+    <h2 style="margin:0 0 6px;color:#2f6f9f">Huurprijs en indexatie (ter info)</h2><table class="sum" style="width:100%;background:transparent"><tbody>${rows}</tbody>${lines.filter(r => r.from <= D && (!r.to || r.to >= D)).length > 1 ? `<tfoot><tr><th>Huidige huur per maand (${dfmt(D)})</th><th class="num">${eur2(r2(tot))}</th></tr></tfoot>` : ''}</table>
+    <p class="pf" style="margin-top:6px">Huur geïndexeerd volgens de gezondheidsindex, basis 2013 (Statbel): basishuur × nieuwe index ÷ oorspronkelijke index. Dit deel is enkel ter info en telt niet mee in de afrekening hierboven.</p></div>`;
 }
 // afrekening per organisatie: één pagina per organisatie, via afdrukken → "Opslaan als PDF"
 function orgPdf(sel) {
