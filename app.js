@@ -565,11 +565,12 @@ function orgPdf(sel) {
       ${SIMKEY ? `<p><b>Simulatie</b> – alle kostenlijnen (behalve 'Rechtstreeks') berekend met "${esc(SIMKEY)}". Geen definitieve afrekening.</p>` : ''}
       <h2>Overzicht</h2><table class="sum"><tbody><tr><td>Aandeel in de kosten (incl. btw)</td><td class="num">${eur2(sh)}</td></tr><tr><td style="padding-left:16px;font-size:90%">waarvan btw</td><td class="num" style="font-size:90%">${eur2(vt)}</td></tr><tr><td>Betaalde voorschotten</td><td class="num">${v ? eur2(v) : '–'}</td></tr></tbody>
       <tfoot><tr><th>${sal > 0.005 ? 'Te betalen' : sal < -0.005 ? 'Terug te krijgen' : 'Saldo'}</th><th class="num">${eur2(Math.abs(sal))}</th></tr></tfoot></table>
+      ${rentInfo(o)}
       ${rows.length ? `<h2>Per categorie</h2><table class="sum"><tbody>${Object.entries(cat).map(([k, n]) => `<tr><td>${esc(k)}</td><td class="num">${eur2(n)}</td></tr>`).join('')}</tbody></table>
       <h2>Detail kostenposten</h2><table><thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Verdeelsleutel</th><th class="num">Uw aandeel</th></tr></thead><tbody>` +
         rows.map(({ c, sh }) => `<tr><td>${esc(c.cat)}</td><td>${esc(c.desc)}${c.supplier || c.invoice ? `<br><span class="sml">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice].filter(Boolean).join(' · '))}</span>` : ''}</td><td style="white-space:nowrap">${dfmt(ovl(c).A)} – ${dfmt(ovl(c).B)}</td><td class="num">${eur2(amtIn(c))}</td><td>${esc(SIMKEY && c.key !== KEYS[3] ? SIMKEY : c.key || KDEF)}</td><td class="num">${eur2(sh)}</td></tr>`).join('') +
         `</tbody><tfoot><tr><th colspan="5">Totaal aandeel</th><th class="num">${eur2(sh)}</th></tr></tfoot></table>` : '<p>Geen kosten aangerekend in deze periode.</p>'}
-      <p class="pf">Bedragen incl. btw (niet aftrekbaar voor De Overmolen). Bedragen = deel van elke kostenpost dat in de periode valt, verdeeld volgens de vermelde sleutel. Voorschotten = betalingen met boekdatum in de periode.</p>${rentInfo(o)}</section>`;
+      <p class="pf">Bedragen incl. btw (niet aftrekbaar voor De Overmolen). Bedragen = deel van elke kostenpost dat in de periode valt, verdeeld volgens de vermelde sleutel. Voorschotten = betalingen met boekdatum in de periode.</p></section>`;
   }).join('');
   const t = document.title; document.title = 'Lakenhuis_afrekening_' + (sel || 'alle_organisaties').replace(/[^\w-]+/g, '_') + '_' + per.from + '_' + per.to;
   document.body.classList.add('print-org'); window.print();
