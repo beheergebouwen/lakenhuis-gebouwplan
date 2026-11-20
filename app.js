@@ -532,6 +532,24 @@ function bindAfr() {
     exportCsv('Lakenhuis_afrekening_' + per.from + '_' + per.to + '.csv', ['categorie', 'omschrijving', 'leverancier', 'factuur', 'meter', 'van', 'tot', 'bedrag excl. btw', 'btw %', 'bedrag incl. btw', 'sleutel', ...orgs],
       cs.map(c => { const sp = split(c); return [c.cat, c.desc, c.supplier, c.invoice || c.entry, c.meter, dfmt(c.from), dfmt(c.to), ((Number(c.amount) || 0) * ovl(c).f).toFixed(2), Number(c.vat) || 0, amtIn(c).toFixed(2), c.key + (c.org ? ' (' + c.org + ')' : ''), ...orgs.map(o => (sp[o] || 0).toFixed(2))]; })); };
 }
+// huurprijs en indexatie (ter info) onderaan de afrekening – telt niet mee in de afrekening
+function rentInfo(o) {
+  const D = peil, lines = RENT.filter(r => r.org === o && r.from && (r.from <= D || r.from <= per.to) && (!r.to || r.to >= per.from));
+  if (!lines.length) return '';
+  const r2 = v => Math.round(v * 100) / 100, ix = v => Number(v).toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  let tot = 0;
+  const rows = lines.map(r => {
+    const act = r.from <= D && (!r.to || r.to >= D), n = rentNow(r, D), now = r2(n.rent || 0); if (act) tot += now;
+    const lab = (r.note ? r.note.split(/[.;]/)[0] : 'Contract vanaf ' + dfmt(r.from)) + (Number(r.m2) ? ` (${String(r.m2).replace('.', ',')} m²)` : '');
+    const how = n.last ? (n.last.rent == null ? `index ${ymName(n.last.idxMonth)} ontbreekt nog` : `sinds ${dfmt(n.last.date)}: ${eur2(r.base)} × ${ix(n.last.idx)} (${ymName(n.last.idxMonth)}) ÷ ${ix(rentBaseIdx(r))}`) : `basishuur sinds ${dfmt(r.from)}, nog niet geïndexeerd`;
+    const st = rentSteps(r, per.to <= D ? per.to : D).filter(s => s.date >= per.from && s.date <= per.to && s.rent != null);
+    const inP = st.length ? 'Indexatie in deze periode: ' + st.map(s => `${dfmt(s.date)} → ${eur2(r2(s.rent))}`).join(', ') : '';
+    const nx = act ? rentNext(r, D) : '', nxt = nx ? `Volgende indexatie: ${dfmt(nx)} (index ${ymName(prevYm(nx))})` : (r.to ? 'Contract beëindigd op ' + dfmt(r.to) : '');
+    return `<tr${act ? '' : ' style="opacity:.6"'}><td>${esc(lab)}<br><span class="sml">${esc(how)}</span>${inP ? `<br><span class="sml">${esc(inP)}</span>` : ''}${nxt ? `<br><span class="sml">${esc(nxt)}</span>` : ''}</td><td class="num">${act ? eur2(now) + ' / maand' : '–'}</td></tr>`;
+  }).join('');
+  return `<h2>Huurprijs en indexatie (ter info)</h2><table class="sum"><tbody>${rows}</tbody>${lines.filter(r => r.from <= D && (!r.to || r.to >= D)).length > 1 ? `<tfoot><tr><th>Huidige huur per maand (${dfmt(D)})</th><th class="num">${eur2(r2(tot))}</th></tr></tfoot>` : ''}</table>
+    <p class="pf">Huur geïndexeerd volgens de gezondheidsindex, basis 2013 (Statbel): basishuur × nieuwe index ÷ oorspronkelijke index. Dit deel is enkel ter info en telt niet mee in de afrekening hierboven.</p>`;
+}
 // afrekening per organisatie: één pagina per organisatie, via afdrukken → "Opslaan als PDF"
 function orgPdf(sel) {
   PSC = {}; const cs = costsInPeriod(), vo = {};
@@ -550,7 +568,7 @@ function orgPdf(sel) {
       <h2>Detail kostenposten</h2><table><thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Verdeelsleutel</th><th class="num">Uw aandeel</th></tr></thead><tbody>` +
         rows.map(({ c, sh }) => `<tr><td>${esc(c.cat)}</td><td>${esc(c.desc)}${c.supplier || c.invoice ? `<br><span class="sml">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice].filter(Boolean).join(' · '))}</span>` : ''}</td><td style="white-space:nowrap">${dfmt(ovl(c).A)} – ${dfmt(ovl(c).B)}</td><td class="num">${eur2(amtIn(c))}</td><td>${esc(SIMKEY && c.key !== KEYS[3] ? SIMKEY : c.key || KDEF)}</td><td class="num">${eur2(sh)}</td></tr>`).join('') +
         `</tbody><tfoot><tr><th colspan="5">Totaal aandeel</th><th class="num">${eur2(sh)}</th></tr></tfoot></table>` : '<p>Geen kosten aangerekend in deze periode.</p>'}
-      <p class="pf">Bedragen incl. btw (niet aftrekbaar voor De Overmolen). Bedragen = deel van elke kostenpost dat in de periode valt, verdeeld volgens de vermelde sleutel. Voorschotten = betalingen met boekdatum in de periode.</p></section>`;
+      <p class="pf">Bedragen incl. btw (niet aftrekbaar voor De Overmolen). Bedragen = deel van elke kostenpost dat in de periode valt, verdeeld volgens de vermelde sleutel. Voorschotten = betalingen met boekdatum in de periode.</p>${rentInfo(o)}</section>`;
   }).join('');
   const t = document.title; document.title = 'Lakenhuis_afrekening_' + (sel || 'alle_organisaties').replace(/[^\w-]+/g, '_') + '_' + per.from + '_' + per.to;
   document.body.classList.add('print-org'); window.print();
