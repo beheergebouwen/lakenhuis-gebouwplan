@@ -69,6 +69,7 @@ async function reload(first) {
   ORGS = (orgs || []).filter(o => o.name).map(o => ({ _id: o._id, name: o.name, color: o.color || '#e6e2d6', type: o.type || 'Huurder' })).sort((a, b) => a.name.localeCompare(b.name));
   S.settings = (settings || []).find(x => x.key === 'ista') || S.settings;
   { const rr = (settings || []).find(x => x.key === 'regels'); RULES_ID = rr ? rr._id : null; try { RULES = JSON.parse(rr && rr.rules || '{}'); } catch (e) { RULES = {}; } }
+  { const gg = (settings || []).find(x => x.key === 'genegeerd'); IGN_ID = gg ? gg._id : null; try { IGN = new Set(JSON.parse(gg && gg.rules || '[]')); } catch (e) { IGN = new Set(); } }
   for (const k of ['heatCost', 'totalUnits', 'rentTotal', 'meterCount']) S.settings[k] = Number(S.settings[k]) || 0;
   if (!per) { const y = +peil.slice(0, 4) - 1; per = { from: y + '-01-01', to: y + '-12-31' }; }   // standaard: vorig kalenderjaar
   if (!first) setStatus('live', 'Verbonden met SharePoint · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }));
@@ -710,6 +711,9 @@ function catKey(gl, desc, rel) {
 // ---------- slim importeren: HUURPAT, geleerde keuzes, ontbrekende voorschotten
 const OWNER_RE = /\bepb\b|schilder|verfwerk|\bgsm\b|smartphone|huurvermindering|renovatie|investering/i;
 let RULES = {}, RULES_ID = null;
+// lijnen die je bij een vorige import NIET in de afrekening nam: worden bij een volgende import niet opnieuw als 'nieuw' getoond
+let IGN = new Set(), IGN_ID = null;
+const ignKey = u => String(u || '').replace(/^EX:/, '');
 const ruleKey = c => { const s = String(c.supplier || '').toLowerCase().replace(/\b(nv|bv|sa|srl|bvba|vzw|n\.v\.|s\.a\.)\b/g, '').replace(/[^a-z]/g, '').slice(0, 30); return (s || String(c.desc || '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 30)) + '|' + String(c.gl || '').slice(0, 4); };
 function applyRules(costs) {
   for (const c of costs) { const r = RULES[ruleKey(c)]; if (!r) continue;
@@ -787,11 +791,11 @@ function parseExact(text) {
   return { lines, costs, vos, info, from: dates[0], to: dates[dates.length - 1], cc: [...new Set(lines.map(l => l.cc).filter(Boolean))] };
 }
 function diffImport(P) {
-  const R = { cAdd: [], cSame: [], cChg: [], cDel: [], vAdd: [], vSame: [], vChg: [], vDel: [] };
+  const R = { cAdd: [], cIgn: [], cSame: [], cChg: [], cDel: [], vAdd: [], vSame: [], vChg: [], vDel: [] };
   const inR = d => d && d >= P.from && d <= P.to;
   const ec = new Map(COSTS.filter(c => c.uid).map(c => [c.uid, c])), seenC = new Set();
   for (const c of P.costs) { seenC.add(c.uid); const o = ec.get(c.uid);
-    if (!o) R.cAdd.push(c); else if (Math.abs((Number(o.amount) || 0) - c.amount) > 0.004 || (o.desc || '') !== c.desc || (o.supplier || '') !== c.supplier || (o.vat === '' || o.vat == null) && c.vat) R.cChg.push({ n: c, o, on: true }); else R.cSame.push(c); }
+    if (!o && IGN.has(ignKey(c.uid))) R.cIgn.push(c); else if (!o) R.cAdd.push(c); else if (Math.abs((Number(o.amount) || 0) - c.amount) > 0.004 || (o.desc || '') !== c.desc || (o.supplier || '') !== c.supplier || (o.vat === '' || o.vat == null) && c.vat) R.cChg.push({ n: c, o, on: true }); else R.cSame.push(c); }
   // enkel als het bestand zelf kostenlijnen bevat; nooit standaard aangevinkt (gebruiker beslist)
   if (P.costs.length) for (const o of COSTS) if (o.src === 'Exact' && o.uid && !seenC.has(o.uid) && inR(o.bdate)) R.cDel.push({ o, on: false });
   const ev = new Map(VOS.filter(v => v.uid).map(v => [v.uid, v])), seenV = new Set();
@@ -808,7 +812,7 @@ function bindImport() {
   $('#aImpFile').onchange = async e => {
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;
     const box = $('#afrImp'); box.hidden = false; box.innerHTML = '<p>Bestand lezen…</p>';
-    try { const P = parseExact(decodeFile(await f.arrayBuffer())); applyRules(P.costs); IMP = { file: f, P, R: diffImport(P), learned: {} }; renderImport(); }
+    try { const P = parseExact(decodeFile(await f.arrayBuffer())); applyRules(P.costs); const R = diffImport(P); R.cAdd.forEach(c => { c.hid = c.on === false; }); IMP = { file: f, P, R, learned: {} }; renderImport(); }
     catch (er) { box.innerHTML = `<div class="occbox"><b class="err">Import mislukt:</b> ${esc(er.message)} <button class="btn" id="impX">Sluiten</button></div>`; $('#impX').onclick = () => { box.hidden = true; }; }
   };
 }
@@ -840,8 +844,8 @@ function renderImport() {
     <div class="imp-head"><b>Import Exact: ${esc(file.name)}</b> <span class="chip">${P.lines.length} lijnen</span> <span class="chip">boekdatum ${dfmt(P.from)} – ${dfmt(P.to)}</span>${P.cc.length ? `<span class="chip">kostenplaats: ${esc(P.cc.join(', '))}</span>` : ''}</div>
     <div class="cards imp-cards">
       <div class="card"><span class="k">Kosten (6xxxxx)</span><span class="v">${eur2(sum(P.costs))}</span><span class="k">${P.costs.length} lijnen</span></div>
-      <div class="card"><span class="k">Kosten nieuw</span><span class="v">${R.cAdd.length}</span><span class="k">${eur2(sum(R.cAdd))}</span></div>
-      <div class="card"><span class="k">Al aanwezig</span><span class="v">${R.cSame.length + R.vSame.length}</span><span class="k">ongewijzigd, overgeslagen</span></div>
+      <div class="card"><span class="k">Huurderslasten nieuw</span><span class="v">${R.cAdd.filter(c => !c.hid).length}</span><span class="k">${eur2(sum(R.cAdd.filter(c => !c.hid)))}${R.cAdd.some(c => c.hid) ? ` · ${R.cAdd.filter(c => c.hid).length} eigenaarskosten verborgen` : ''}</span></div>
+      <div class="card"><span class="k">Al aanwezig</span><span class="v">${R.cSame.length + R.vSame.length}</span><span class="k">ongewijzigd, overgeslagen${R.cIgn.length ? ` · ${R.cIgn.length} eerder niet opgenomen` : ''}</span></div>
       <div class="card ${R.cChg.length + R.vChg.length ? 'warnc' : ''}"><span class="k">Gewijzigd in Exact</span><span class="v">${R.cChg.length + R.vChg.length}</span></div>
       <div class="card ${R.cDel.length + R.vDel.length ? 'badc' : ''}"><span class="k">Niet meer in Exact</span><span class="v">${R.cDel.length + R.vDel.length}</span></div>
       <div class="card"><span class="k">Voorschotten (702000 · HUUR)</span><span class="v">${eur2(sum(P.vos))}</span><span class="k">${P.vos.length} lijnen · ${R.vAdd.length} nieuw</span></div>
@@ -850,8 +854,11 @@ function renderImport() {
     ${unmapped.length ? `<div class="imp-map"><b class="imp-warn">Koppel deze huurders aan een organisatie:</b>${unmapped.map(n => `<label>${esc(n)} → <select class="imap" data-n="${esc(n)}"><option value="">– kies –</option>${opt(orgNames, '')}</select></label>`).join('')}</div>` : ''}
     ${R.cChg.length ? `<h3>Gewijzigd in Exact (${R.cChg.length})</h3><div class="tscroll"><table class="imp-t"><thead><tr><th>Bijwerken</th><th>Boekstuk</th><th>Omschrijving</th><th class="num">Oud</th><th class="num">Nieuw</th></tr></thead><tbody>${R.cChg.map((x, i) => `<tr class="chg" data-i="${i}" data-k="cChg"><td><input type="checkbox" class="ion" ${x.on ? 'checked' : ''}></td><td class="mono">${esc(x.n.entry)}</td><td class="wrap">${esc(x.o.desc)}${x.o.desc !== x.n.desc ? '<br>→ ' + esc(x.n.desc) : ''}</td><td class="num mono">${eur2(Number(x.o.amount) || 0)}</td><td class="num mono">${eur2(x.n.amount)}</td></tr>`).join('')}</tbody></table></div><p class="empty" style="font-size:12px">Bij bijwerken veranderen enkel bedrag, omschrijving, leverancier en grootboek. Jouw categorie, sleutel en periode blijven.</p>` : ''}
     ${R.cDel.length ? `<h3>Niet meer in Exact (${R.cDel.length})</h3><div class="tscroll"><table class="imp-t"><thead><tr><th>Verwijderen</th><th>Boekstuk</th><th>Omschrijving</th><th class="num">Bedrag</th></tr></thead><tbody>${R.cDel.map((x, i) => `<tr class="del" data-i="${i}" data-k="cDel"><td><input type="checkbox" class="ion" ${x.on ? 'checked' : ''}></td><td class="mono">${esc(x.o.entry)}</td><td class="wrap">${esc(x.o.desc)}</td><td class="num mono">${eur2(Number(x.o.amount) || 0)}</td></tr>`).join('')}</tbody></table></div>` : ''}
-    ${R.cAdd.length ? `<h3>Nieuwe kosten (${R.cAdd.length}) <span class="empty" style="font-size:12px;font-weight:400">– controleer categorie, sleutel en periode; vinkje uit = niet importeren</span></h3>
-      <div class="tscroll imp-scroll"><table class="imp-t"><thead><tr><th></th><th>Boekdatum / stuk</th><th>Omschrijving</th><th class="num">Bedrag</th><th>Categorie</th><th>Sleutel</th><th>Periode</th></tr></thead><tbody>${R.cAdd.map((c, i) => cRow(c, i, 'cAdd')).join('')}</tbody></table></div>` : ''}
+    ${R.cAdd.length ? `<h3>Nieuwe huurderslasten (${R.cAdd.filter(c => !c.hid).length}) <span class="empty" style="font-size:12px;font-weight:400">– controleer categorie, sleutel en periode; vinkje uit = niet importeren</span></h3>
+      <div class="tscroll imp-scroll"><table class="imp-t"><thead><tr><th></th><th>Boekdatum / stuk</th><th>Omschrijving</th><th class="num">Bedrag</th><th>Categorie</th><th>Sleutel</th><th>Periode</th></tr></thead><tbody>${R.cAdd.map((c, i) => c.hid ? '' : cRow(c, i, 'cAdd')).join('') || '<tr><td colspan="7" class="empty">Geen nieuwe huurderslasten.</td></tr>'}</tbody></table></div>
+      ${R.cAdd.some(c => c.hid) ? `<details class="imp-hid" style="margin-top:8px"><summary><b>${R.cAdd.filter(c => c.hid).length} eigenaarskosten / lijnen zonder HUURPAT</b> (${eur2(sum(R.cAdd.filter(c => c.hid)))}) – verborgen, niet in afrekening. <span class="empty">Klik om te tonen; vink aan om toch mee te nemen.</span></summary>
+        <div class="tscroll imp-scroll"><table class="imp-t"><tbody>${R.cAdd.map((c, i) => c.hid ? cRow(c, i, 'cAdd') : '').join('')}</tbody></table></div></details>` : ''}` : ''}
+    ${R.cIgn.length ? `<details style="margin-top:8px"><summary>${R.cIgn.length} lijnen die je bij een vorige import niet opnam (${eur2(sum(R.cIgn))}) – overgeslagen</summary><p style="font-size:13px;margin:6px 0">Deze lijnen blijven buiten de afrekening. <button class="btn" id="impIgn">Toch tonen om te kiezen</button></p></details>` : ''}
     ${P.vos.length ? `<h3>Voorschotten per organisatie (in dit bestand)</h3><ul class="mini imp-vo">${Object.entries(vByOrg).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<li><span>${esc(k)}</span><span class="mono">${eur2(v)}</span></li>`).join('')}</ul>` : ''}
     ${infoRows ? `<details style="margin-top:10px"><summary>Niet geïmporteerd (ter info): huur, vorige afrekening, balansrekeningen</summary><ul class="mini" style="margin-top:6px">${infoRows}</ul></details>` : ''}
     <div class="btns" style="margin-top:12px"><button class="btn primary" id="impGo">Opslaan in SharePoint</button><button class="btn" id="impX">Annuleren</button><span id="impMsg"></span></div>
@@ -872,6 +879,7 @@ function renderImport() {
     if (t.classList.contains('ito')) c.to = t.value;
   };
   $('#impX').onclick = () => { IMP = null; renderImport(); };
+  if ($('#impIgn')) $('#impIgn').onclick = () => { R.cIgn.forEach(c => { c.hid = true; c.on = false; R.cAdd.push(c); }); R.cIgn = []; renderImport(); };
   $('#impGo').onclick = () => saveImport();
 }
 async function saveImport() {
@@ -879,7 +887,7 @@ async function saveImport() {
   if (P.vos.some(v => !v.org)) { msg.className = 'err'; msg.textContent = 'Koppel eerst alle huurders aan een organisatie.'; return; }
   if (R.cAdd.some(c => c.on && c.from > c.to)) { msg.className = 'err'; msg.textContent = "Een periode heeft 'Tot' vóór 'Van'."; return; }
   const ops = [];
-  for (const c of R.cAdd) if (c.on) { const o = { ...c }; delete o.on; delete o.psrc; delete o.warn; delete o.learned; delete o.vsrc; if (o.key !== KEYS[3]) o.org = ''; ops.push({ kind: 'costs', op: 'add', obj: o }); }
+  for (const c of R.cAdd) if (c.on) { const o = { ...c }; delete o.on; delete o.psrc; delete o.warn; delete o.learned; delete o.vsrc; delete o.hid; if (o.key !== KEYS[3]) o.org = ''; ops.push({ kind: 'costs', op: 'add', obj: o }); }
   for (const x of R.cChg) if (x.on) ops.push({ kind: 'costs', op: 'upd', obj: { _id: x.o._id, vat: (x.o.vat === '' || x.o.vat == null) ? x.n.vat : Number(x.o.vat), amount: x.n.amount, desc: x.n.desc, supplier: x.n.supplier, gl: x.n.gl, entry: x.n.entry, bdate: x.n.bdate } });
   for (const x of R.cDel) if (x.on) ops.push({ kind: 'costs', op: 'del', obj: { _id: x.o._id } });
   for (const v of R.vAdd) ops.push({ kind: 'vo', op: 'add', obj: v });
@@ -895,6 +903,8 @@ async function saveImport() {
     const n = k => ops.filter(o => o.op === k).length;
     try { await LK.save('imp', { file: file.name, at: new Date().toLocaleString('nl-BE'), from: P.from, to: P.to, lines: P.lines.length, added: n('add'), changed: n('upd'), removed: n('del'), who: $('#who').textContent, note }); } catch (er) { note += ' · log niet bewaard: ' + er.message; }
     if (Object.keys(IMP.learned || {}).length) { for (const { c, ch } of Object.values(IMP.learned)) learn(c, ch); await saveRules(); }
+    { let chg = false; for (const c of R.cAdd) { const k = ignKey(c.uid); if (!k) continue; if (c.on === false && !IGN.has(k)) { IGN.add(k); chg = true; } else if (c.on !== false && IGN.delete(k)) chg = true; }
+      if (chg) { const o = { key: 'genegeerd', rules: JSON.stringify([...IGN]) }; if (IGN_ID) o._id = IGN_ID; try { await LK.save('settings', o); IGN_ID = o._id; } catch (er) { note += ' · niet-opgenomen lijnen niet onthouden: ' + er.message; } } }
     await reload(); IMP = null; renderAll(true);
     setStatus('live', `Import klaar: ${n('add')} nieuw · ${n('upd')} bijgewerkt · ${n('del')} verwijderd`);
     const box = $('#afrImp'); box.hidden = false; box.innerHTML = `<div class="occbox"><b class="saved">✓ Import opgeslagen</b> – ${n('add')} nieuw · ${n('upd')} bijgewerkt · ${n('del')} verwijderd. <span class="empty">${esc(note)}</span> <button class="btn" id="impX">Sluiten</button></div>`;
