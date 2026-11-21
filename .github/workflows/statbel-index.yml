@@ -14,25 +14,26 @@ jobs:
       - name: Index ophalen bij Statbel
         run: |
           python3 - <<'PY'
-          import json, io, zipfile, urllib.request, datetime
-          # Statbel open data: consumptieprijsindex + gezondheidsindex, alle basisjaren (TXT in ZIP)
-          U = 'https://statbel.fgov.be/sites/default/files/files/opendata/Consumptieprijsindex%20en%20gezondheidsindex/CPI%20All%20base%20years.zip'
-          z = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(U, timeout=120).read()))
-          txt = z.read([n for n in z.namelist() if n.lower().endswith('.txt')][0]).decode('utf-8-sig', 'replace')
-          rows = [l.split('|') for l in txt.splitlines() if l.strip()]; h = rows[0]; I = {k: i for i, k in enumerate(h)}
+          import json, urllib.request, datetime
+          # be.STAT API van Statbel (JSON, laatste 13 maanden): gezondheidsindex basis 2013 = 100
+          U = 'https://bestat.statbel.fgov.be/bestat/api/views/e8fad1c0-5270-4d62-9118-0999ee8cb323/result/JSON'
+          req = urllib.request.Request(U, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) Chrome/124.0 Safari/537.36', 'Accept': 'application/json'})
+          raw = urllib.request.urlopen(req, timeout=120).read().decode('utf-8-sig', 'replace')
+          try: facts = json.loads(raw)['facts']
+          except Exception: raise SystemExit('Geen JSON van Statbel ontvangen: ' + raw[:200])
           new = {}
-          for r in rows[1:]:
-              if len(r) < len(h) or r[I['NM_BASE_YR']] != '2013' or r[I['MS_HLTH_IDX']] in ('.', ''): continue
-              k = f"{int(r[I['NM_YR']])}-{int(r[I['NM_MTH']]):02d}"
-              if k >= '2018-01': new[k] = round(float(r[I['MS_HLTH_IDX']]), 2)
-          if len(new) < 12: raise SystemExit('Te weinig indexcijfers gevonden - controleer het Statbel-bestand')
+          for f in facts:
+              if f.get('Level 1') != 'Health index' or not str(f.get('Base year', '')).startswith('2013'): continue
+              d = datetime.datetime.strptime(f['Month'], '%B %Y')
+              new[f"{d.year}-{d.month:02d}"] = round(float(f['Consumer price index']), 2)
+          if len(new) < 6: raise SystemExit('Te weinig indexcijfers gevonden - controleer de Statbel-API')
           for k, v in new.items():
               if not 90 < v < 300: raise SystemExit('Onverwachte waarde ' + k + ': ' + str(v))
           try: d = json.load(open('index.json'))
           except Exception: d = {}
           idx = dict(d.get('index2013', {})); before = dict(idx); idx.update(new)
           if idx != before:
-              d = {'bron': 'Statbel open data - gezondheidsindex, basis 2013 = 100', 'bestand': U, 'bijgewerkt': datetime.date.today().isoformat(), 'index2013': dict(sorted(idx.items()))}
+              d = {'bron': 'Statbel be.STAT - gezondheidsindex, basis 2013 = 100', 'bestand': U, 'bijgewerkt': datetime.date.today().isoformat(), 'index2013': dict(sorted(idx.items()))}
               json.dump(d, open('index.json', 'w'), indent=1, ensure_ascii=False)
           print(len(new), 'maanden gelezen, laatste', max(new), '=', new[max(new)])
           PY
