@@ -1103,6 +1103,7 @@ function renderHuur() {
   };
   // indexlijst
   const ks = Object.keys(IDX).sort().reverse();
+  { const ia = $('#idxAuto'); if (ia) ia.textContent = 'automatisch via Statbel · dagelijks gecontroleerd' + (IDX_UPD ? ' · laatst bijgewerkt ' + dfmt(IDX_UPD) : ''); }
   $('#tIdx').innerHTML = `<thead><tr><th>Maand</th><th class="num">Gezondheidsindex (2013 = 100)</th></tr></thead><tbody>` + ks.slice(0, 24).map(k => `<tr><td>${ymName(k)}</td><td class="num mono">${fmtIdx(IDX[k])}</td></tr>`).join('') + '</tbody>';
   $('#idxNew').innerHTML = canWrite ? `<b>Index toevoegen</b> <input type="month" id="iMon"> <input id="iVal" placeholder="bv. 141,91" inputmode="decimal" style="width:100px"> <button class="btn" id="iAdd">Opslaan</button> <a href="https://statbel.fgov.be/nl/themas/consumptieprijsindex/gezondheidsindex" target="_blank" rel="noopener">Statbel</a> <span id="iMsg"></span>` : '';
   if (canWrite) $('#iAdd').onclick = async () => {
