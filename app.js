@@ -303,12 +303,21 @@ function renderDoors() {
     try { await save('doors', code, body); S.doors[code] = body; } catch (er) { el.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); }
   };
 }
+// getal uit invoer: "39.584,70", "39584,70", "39584.70" → 39584.7
+const pnum = v => { let s = String(v ?? '').trim().replace(/[\s€]/g, ''); if (!s) return 0;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.'); else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, ''); return Number(s) || 0; };
 function renderIsta() {
-  const st = S.settings; $('#istaPeriod').textContent = 'Afrekening ' + st.period;
+  const st = S.settings; $('#istaPeriod').textContent = 'Afrekening ' + (st.period || '');
   const ms = Object.values(S.meters); const linked = ms.filter(m => m.room).length;
   const totUnits = ms.reduce((s, m) => s + (Number(m.units) || 0), 0);
-  $('#istaCards').innerHTML = `
-    <div class="card"><span class="k">Verwarmingskost (Ista, incl. btw)</span><span class="v">${eur(st.heatCost)}</span><span class="k">${Number(st.totalUnits).toLocaleString('nl-BE')} eenheden · ${price().toLocaleString('nl-BE', { maximumFractionDigits: 4 })} €/eenh.</span></div>
+  const inp = (id, v, w) => `<input id="${id}" value="${v}" style="width:${w}px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--paper)">`;
+  $('#istaCards').innerHTML = (canWrite ? `
+    <div class="card"><span class="k">Ista-gegevens (aanpassen en Enter)</span>
+      <span class="k">Periode ${inp('iPer', esc(st.period || ''), 170)}</span>
+      <span class="k">Verwarmingskost € ${inp('iCost', st.heatCost ? String(st.heatCost).replace('.', ',') : '', 100)}</span>
+      <span class="k">Units totaal ${inp('iUnits', st.totalUnits ? String(st.totalUnits).replace('.', ',') : '', 110)} <button class="btn" id="iSum" title="Som van het verbruik van alle meters overnemen" style="font-size:11px">= som meters (${totUnits.toLocaleString('nl-BE')})</button></span>
+      <span class="k">${price().toLocaleString('nl-BE', { maximumFractionDigits: 6 })} € per unit</span></div>` : `
+    <div class="card"><span class="k">Verwarmingskost (Ista, incl. btw)</span><span class="v">${eur(st.heatCost)}</span><span class="k">${Number(st.totalUnits).toLocaleString('nl-BE')} units · ${price().toLocaleString('nl-BE', { maximumFractionDigits: 6 })} €/unit</span></div>`) + `
     <div class="card"><span class="k">Huur kostenverdelers</span><span class="v">${eur(st.rentTotal)}</span><span class="k">${st.meterCount} meters · ${eur(rent())} per meter</span></div>
     <div class="card"><span class="k">Meters gekoppeld aan een ruimte</span><span class="v">${linked} / ${ms.length}</span><div class="bar"><span style="width:${ms.length ? linked / ms.length * 100 : 0}%;background:var(--accent)"></span></div></div>`;
   const opts = r => '<option value="">– kies ruimte –</option>' + GEO.floors.map(f => `<optgroup label="${esc(f.label)}">` + Object.values(S.rooms).filter(x => x.floor === f.id).sort((a, b) => a.code.localeCompare(b.code))
@@ -318,15 +327,37 @@ function renderIsta() {
     ms.sort((a, b) => a.unit.localeCompare(b.unit) || a.nr.localeCompare(b.nr)).map(m => { const r = roomOf(m.room); return `<tr data-nr="${esc(m.nr)}"><td class="mono">${esc(m.nr)}</td><td class="mono">${esc(m.unit)}</td><td>${esc(m.istaRoom)}</td>
       <td class="num mono">${canWrite ? `<input class="ivu" inputmode="decimal" value="${Number(m.units) || ''}" placeholder="0" aria-label="Verbruik meter ${esc(m.nr)}" style="width:80px;text-align:right">` : Number(m.units).toLocaleString('nl-BE')}</td><td><select ${dis} aria-label="Ruimte voor meter ${esc(m.nr)}" style="${m.room ? '' : 'border-color:var(--bad)'}">${opts(m.room)}</select>${r ? ` <button class="btn" data-go="${esc(r.code)}" style="padding:2px 8px;font-size:12px">plan</button>` : ''}</td>
       <td>${orgOf(r) ? `<span class="swatch" style="background:${orgColor(orgOf(r))}"></span>${esc(orgOf(r))}` : (r ? '<span class="empty">–</span>' : '')}</td>
-      <td class="num mono">${eur((Number(m.units) || 0) * price())}</td><td class="num mono">${eur(meterCost(m))}</td><td class="wrap">${esc(m.note)}</td></tr>`; }).join('') +
+      <td class="num mono">${eur((Number(m.units) || 0) * price())}</td><td class="num mono">${eur(meterCost(m))}</td><td class="wrap">${canWrite ? `<input class="inote" value="${esc(m.note || '')}" placeholder="opmerking" aria-label="Opmerking meter ${esc(m.nr)}" style="width:100%;min-width:200px;font-size:12px">` : esc(m.note)}</td></tr>`; }).join('') +
     `</tbody><tfoot><tr><th colspan="3">Totaal</th><th class="num mono">${totUnits.toLocaleString('nl-BE')}</th><th colspan="2"></th><th class="num mono">${eur(totUnits * price())}</th><th class="num mono">${eur(ms.reduce((s, m) => s + meterCost(m), 0))}</th><th></th></tr></tfoot>`;
   $('#tIsta').onchange = async e => {
     const iv = e.target.closest('input.ivu');
-    if (iv) { const nr = iv.closest('tr').dataset.nr, v = Number(String(iv.value).replace(/\s/g, '').replace(',', '.')) || 0, body = { ...S.meters[nr], units: v };
+    const nt = e.target.closest('input.inote');
+    if (nt) { const nr = nt.closest('tr').dataset.nr, body = { ...S.meters[nr], note: nt.value.trim() };
+      try { await save('meters', nr, body); S.meters[nr] = body; } catch (er) { nt.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); } return; }
+    if (iv) { const nr = iv.closest('tr').dataset.nr, v = pnum(iv.value), body = { ...S.meters[nr], units: v };
       try { await save('meters', nr, body); S.meters[nr] = body; PSC = {}; renderAll(true); } catch (er) { iv.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); } return; }
     const s = e.target.closest('select'); if (!s) return; const nr = s.closest('tr').dataset.nr; const body = { ...S.meters[nr], room: s.value };
     try { await save('meters', nr, body); S.meters[nr] = body; renderAll(true); } catch (er) { s.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); } };
   $('#tIsta').onclick = e => { const b = e.target.closest('[data-go]'); if (b) select(b.dataset.go); };
+  if (!canWrite) { $('#istaNew').innerHTML = ''; return; }
+  const saveSet = async ch => { const o = { ...S.settings, ...ch, key: 'ista' };
+    try { await LK.save('settings', o); S.settings = { ...o }; PSC = {}; renderAll(true); } catch (er) { setStatus('ro', 'Ista-gegevens niet opgeslagen: ' + er.message); } };
+  $('#iPer').onchange = () => saveSet({ period: $('#iPer').value.trim() });
+  $('#iCost').onchange = () => saveSet({ heatCost: pnum($('#iCost').value) });
+  $('#iUnits').onchange = () => saveSet({ totalUnits: pnum($('#iUnits').value) });
+  $('#iSum').onclick = () => saveSet({ totalUnits: Math.round(totUnits * 100) / 100 });
+  $('#istaNew').innerHTML = `<b>Meter toevoegen</b>
+    <input id="nNr" placeholder="Meternummer" style="width:120px"> <input id="nUnit" placeholder="Ista-groep (bv. 0016)" style="width:140px">
+    <input id="nIr" placeholder="Ruimte volgens Ista" style="width:150px"> <select id="nRoom">${opts('')}</select>
+    <input id="nUnits" inputmode="decimal" placeholder="Verbruik" style="width:100px"> <input id="nNote" placeholder="Opmerking (bv. schatting)" style="width:220px">
+    <button class="btn" id="nAdd">Toevoegen</button>`;
+  $('#nAdd').onclick = async () => {
+    const nr = $('#nNr').value.trim(); if (!nr) { setStatus('ro', 'Vul het meternummer in'); return; }
+    if (S.meters[nr]) { setStatus('ro', 'Meter ' + nr + ' bestaat al – pas het verbruik aan in de tabel'); return; }
+    const o = { nr, unit: $('#nUnit').value.trim(), istaRoom: $('#nIr').value.trim(), room: $('#nRoom').value, units: pnum($('#nUnits').value), note: $('#nNote').value.trim() };
+    try { await LK.save('meters', o); S.meters[nr] = o; PSC = {}; renderAll(true); setStatus('live', 'Meter ' + nr + ' toegevoegd'); }
+    catch (er) { setStatus('ro', 'Meter niet toegevoegd: ' + (er.status === 403 ? 'geen bewerkrechten' : er.message)); }
+  };
 }
 function orgUse(n) {
   const has = s => String(s || '').split(' + ').includes(n), u = [];
