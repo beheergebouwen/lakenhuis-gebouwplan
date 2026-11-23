@@ -7,6 +7,21 @@
     cache: { cacheLocation: 'localStorage' }
   });
   const ready = msal.initialize();
+  // In Teams (of een andere iframe) werken redirects niet: daar aanmelden via een pop-upvenster
+  const IFR = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+  const IS_POPUP = !!window.opener && window.opener !== window && /^msal\./.test(window.name || '');
+  function signInButton() {
+    return new Promise((ok, no) => {
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(244,243,239,.96);font-family:inherit';
+      d.innerHTML = '<div style="text-align:center;max-width:420px;padding:24px"><h2 style="margin:0 0 8px">Lakenhuis Gebouwplan</h2><p style="margin:0 0 16px">Meld je aan met je De Overmolen-account.</p><button id="lkSignIn" style="font-size:16px;padding:10px 18px;border-radius:8px;border:0;background:#2f6f9f;color:#fff;cursor:pointer">Aanmelden met Microsoft</button><p id="lkSignErr" style="color:#b00;font-size:13px;margin-top:12px"></p></div>';
+      document.body.appendChild(d);
+      d.querySelector('#lkSignIn').onclick = async () => {
+        try { const r = await msal.loginPopup({ scopes: SCOPES }); d.remove(); ok(r.account); }
+        catch (e) { d.querySelector('#lkSignErr').textContent = 'Aanmelden niet gelukt (' + (e.errorCode || e.message) + '). Sta pop-ups toe of open de app in de browser.'; }
+      };
+    });
+  }
   let account = null, siteId = null; const listIds = {};
 
   // Field mapping: app field -> SharePoint internal column name
@@ -38,7 +53,7 @@
 
   async function token() {
     try { return (await msal.acquireTokenSilent({ scopes: SCOPES, account })).accessToken; }
-    catch (e) { await msal.acquireTokenRedirect({ scopes: SCOPES, account }); }
+    catch (e) { if (IFR) return (await msal.acquireTokenPopup({ scopes: SCOPES, account })).accessToken; await msal.acquireTokenRedirect({ scopes: SCOPES, account }); }
   }
   async function g(path, opt = {}) {
     const url = path.startsWith('http') ? path : 'https://graph.microsoft.com/v1.0' + path;
@@ -54,8 +69,10 @@
   const API = {
     async login() {
       await ready;
-      const res = await msal.handleRedirectPromise();
+      if (IS_POPUP) return new Promise(() => {});          // dit is het aanmeld-pop-upvenster: niets doen, MSAL sluit het zelf
+      const res = IFR ? null : await msal.handleRedirectPromise();
       account = res?.account || msal.getAllAccounts()[0] || null;
+      if (!account && IFR) { try { account = (await msal.ssoSilent({ scopes: SCOPES })).account; } catch (e) { account = await signInButton(); } }
       if (!account) { await msal.loginRedirect({ scopes: SCOPES }); return null; }
       msal.setActiveAccount(account);
       const site = await g(`/sites/${C.siteHostname}:${C.sitePath}`); siteId = site.id;
@@ -122,7 +139,7 @@
       if (!r.ok) { let m = r.status + ''; try { m = (await r.json()).error.message; } catch (e) {} throw new Error(m); }
       return r.json();
     },
-    logout() { msal.logoutRedirect({ account }); },
+    logout() { IFR ? msal.logoutPopup({ account }).then(() => location.reload()) : msal.logoutRedirect({ account }); },
     get siteId() { return siteId; }
   };
   window.LK = API;
