@@ -8,7 +8,8 @@ window.LK_CONFIG = {
   lists: {
     rooms: "LK_Ruimten", doors: "LK_Deuren", meters: "LK_IstaMeters",
     orgs: "LK_Organisaties", settings: "LK_Instellingen", occ: "LK_Bezetting", costs: "LK_Kosten",
-    vo: "LK_Voorschotten", imp: "LK_Imports", rent: "LK_Huur", idx: "LK_Index"
+    vo: "LK_Voorschotten", imp: "LK_Imports", rent: "LK_Huur", idx: "LK_Index",
+    reads: "LK_IstaStanden", corr: "LK_Correcties"
   },
   importFolder: "Lakenhuis/Imports"                // map voor originele importbestanden (Exact)
 };

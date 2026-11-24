@@ -32,8 +32,17 @@ function orgDays(r, a, b) {                      // dagen per organisatie binnen
   for (const o of rows) { const s = Math.max(dnum(a), o.from ? dnum(o.from) : -1e9), e = Math.min(dnum(b), o.to ? dnum(o.to) : 1e9); if (e >= s) out[o.org] = (out[o.org] || 0) + e - s + 1; }
   return out;
 }
-function istaPeriod() { const m = String(S.settings.period || '').match(/(\d\d)\/(\d\d)\/(\d{4}).*?(\d\d)\/(\d\d)\/(\d{4})/); return m ? { from: `${m[3]}-${m[2]}-${m[1]}`, to: `${m[6]}-${m[5]}-${m[4]}` } : { from: peil.slice(0, 4) + '-01-01', to: peil.slice(0, 4) + '-12-31' }; }
+function istaPeriod() { return pdates(S.settings.period) || { from: peil.slice(0, 4) + '-01-01', to: peil.slice(0, 4) + '-12-31' }; }
 let per = null;
+// ---------- Ista per periode: elke Ista-afrekening (bv. 01/03/2025 – 28/02/2026) heeft eigen kost, units en meterstanden
+let PERIODS = [], READS = {}, CURP = '', CORR = [], READS_OK = false, CORR_OK = false;
+const pdates = t => { const m = String(t || '').match(/(\d\d)\/(\d\d)\/(\d{4}).*?(\d\d)\/(\d\d)\/(\d{4})/); return m ? { from: `${m[3]}-${m[2]}-${m[1]}`, to: `${m[6]}-${m[5]}-${m[4]}` } : null; };
+const pkeyOf = t => { const d = pdates(t); return d ? d.from.slice(0, 4) + '-' + d.to.slice(0, 4) : String(t || '').trim() || 'zonder periode'; };
+const curP = () => PERIODS.find(p => p.pkey === CURP) || null;
+const isLegacy = pk => { const p = PERIODS.find(x => x.pkey === pk); return !!p && p.key === 'ista' && !Object.keys(READS[pk] || {}).length; };
+function rd(m, pk) { const r = READS[pk] && READS[pk][m.nr]; if (r) return r; return isLegacy(pk) && Number(m.units) ? { units: Number(m.units), note: '' } : null; }   // oude manier: verbruik stond in LK_IstaMeters
+const hasReads = pk => Object.values(S.meters).some(m => Number(rd(m, pk)?.units) > 0);
+function applyCur() { const p = curP(); S.settings = p ? { ...p } : { period: '', heatCost: 0, totalUnits: 0, rentTotal: 0, meterCount: 0 }; for (const m of Object.values(S.meters)) { const r = rd(m, CURP); m.u = r ? Number(r.units) || 0 : 0; m.rn = r ? r.note || '' : ''; } }
 const S = { rooms: {}, doors: {}, meters: {}, settings: {} };      // seed baseline overlaid with live docs
 let floor = 'f2', sel = null, zoom = 1;
 try { const t = localStorage.getItem('lk.floor'); if (t) floor = t; } catch (e) {}
@@ -55,7 +64,9 @@ async function boot() {
   setInterval(() => { if (!document.hidden && !document.activeElement?.closest('form,select,input,textarea')) reload().then(() => renderAll(true)); }, 60000);
 }
 async function reload(first) {
-  const [rooms, doors, meters, orgs, settings, occ, costs, vo, imp, rent, idx] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ', 'costs', 'vo', 'imp', 'rent', 'idx'].map(k => LK.load(k).catch(() => null)));
+  const [rooms, doors, meters, orgs, settings, occ, costs, vo, imp, rent, idx, reads, corr] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ', 'costs', 'vo', 'imp', 'rent', 'idx', 'reads', 'corr'].map(k => LK.load(k).catch(() => null)));
+  CORR = (corr || []).filter(x => x.cid && x.field); CORR_OK = !!corr;
+  READS = {}; READS_OK = !!reads; for (const r of reads || []) if (r.nr && r.pkey) (READS[r.pkey] || (READS[r.pkey] = {}))[r.nr] = r;
   COSTS = costs || []; VOS = (vo || []).filter(v => v.org); IMPS = imp || [];
   RENT = (rent || []).filter(r => r.org); IDX_ITEMS = (idx || []).filter(x => x.month && x.value !== ''); IDX = Object.fromEntries(IDX_ITEMS.map(x => [x.month, Number(x.value)]));
   // index.json wordt elke dag automatisch bijgewerkt vanuit Statbel (GitHub Action); ontbrekende maanden aanvullen + bewaren in LK_Index
@@ -67,10 +78,11 @@ async function reload(first) {
   S.rooms = Object.fromEntries(rooms.map(r => [r.code, r])); S.doors = Object.fromEntries(doors.map(d => [d.code, d]));
   S.meters = Object.fromEntries(meters.map(m => [m.nr, m]));
   ORGS = (orgs || []).filter(o => o.name).map(o => ({ _id: o._id, name: o.name, color: o.color || '#e6e2d6', type: o.type || 'Huurder' })).sort((a, b) => a.name.localeCompare(b.name));
-  S.settings = (settings || []).find(x => x.key === 'ista') || S.settings;
+  PERIODS = (settings || []).filter(x => x.key === 'ista' || /^ista:/.test(x.key || '')).map(x => { const o = { ...x, pkey: pkeyOf(x.period), ...(pdates(x.period) || {}) }; for (const k of ['heatCost', 'totalUnits', 'rentTotal', 'meterCount']) o[k] = Number(o[k]) || 0; return o; }).sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+  if (!PERIODS.some(p => p.pkey === CURP)) { const w = PERIODS.filter(p => hasReads(p.pkey)); CURP = (w[w.length - 1] || PERIODS[PERIODS.length - 1] || {}).pkey || ''; }
+  applyCur();
   { const rr = (settings || []).find(x => x.key === 'regels'); RULES_ID = rr ? rr._id : null; try { RULES = JSON.parse(rr && rr.rules || '{}'); } catch (e) { RULES = {}; } }
   { const gg = (settings || []).find(x => x.key === 'genegeerd'); IGN_ID = gg ? gg._id : null; try { IGN = new Set(JSON.parse(gg && gg.rules || '[]')); } catch (e) { IGN = new Set(); } }
-  for (const k of ['heatCost', 'totalUnits', 'rentTotal', 'meterCount']) S.settings[k] = Number(S.settings[k]) || 0;
   if (!per) { const y = +peil.slice(0, 4) - 1; per = { from: y + '-01-01', to: y + '-12-31' }; }   // standaard: vorig kalenderjaar
   if (!first) setStatus('live', 'Verbonden met SharePoint · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }));
 }
@@ -86,7 +98,7 @@ async function save(col, id, body) {
 const m2 = r => (r.m2meas != null && r.m2meas !== '') ? Number(r.m2meas) : (r.m2plan != null ? Number(r.m2plan) : null);
 const price = () => S.settings.totalUnits ? S.settings.heatCost / S.settings.totalUnits : 0;
 const rent = () => S.settings.meterCount ? S.settings.rentTotal / S.settings.meterCount : 0;
-const meterCost = m => (Number(m.units) || 0) * price() + rent();
+const meterCost = m => (m.u || 0) * price() + rent();
 function metersOf(code) { return Object.values(S.meters).filter(m => m.room === code); }
 function roomOf(code) { return S.rooms[code]; }
 function floorLabel(id) { return GEO.floors.find(f => f.id === id)?.label || id; }
@@ -119,8 +131,8 @@ function buildStatic() {
     Object.values(S.rooms).sort((a, b) => a.code.localeCompare(b.code)).map(r => { const ms = metersOf(r.code); return [r.code, floorLabel(r.floor), r.name, r.use, orgOf(r), r.m2plan ?? '', r.src, r.m2meas ?? '', r.ok ? 'ja' : 'nee', ms.map(m => m.nr).join(' '), ms.reduce((s, m) => s + meterCost(m), 0).toFixed(2), r.note]; }));
   $('#expDoors').onclick = () => exportCsv('Lakenhuis_deuren.csv', ['code', 'verdieping', 'van', 'naar', 'type', 'maat', 'slot_badge', 'sleutel_cilinder', 'gecontroleerd', 'opmerking'],
     Object.values(S.doors).sort((a, b) => a.code.localeCompare(b.code)).map(d => [d.code, floorLabel(d.floor), d.fr, d.to, d.type, d.size, d.lock, d.key, d.checked ? 'ja' : 'nee', d.note]));
-  $('#expIsta').onclick = () => exportCsv('Lakenhuis_ista.csv', ['meternummer', 'ista_unit', 'ista_ruimte', 'verbruik_eenheden', 'ruimtecode', 'ruimte', 'organisatie', 'verwarming_eur', 'huur_meter_eur', 'totaal_eur'],
-    Object.values(S.meters).map(m => { const r = roomOf(m.room) || {}; return [m.nr, m.unit, m.istaRoom, m.units, m.room, r.name || '', orgOf(r) || '', ((Number(m.units) || 0) * price()).toFixed(2), rent().toFixed(2), meterCost(m).toFixed(2)]; }));
+  $('#expIsta').onclick = () => exportCsv('Lakenhuis_ista_' + (CURP || 'periode') + '.csv', ['ista_periode', 'meternummer', 'ista_unit', 'ista_ruimte', 'verbruik_eenheden', 'ruimtecode', 'ruimte', 'organisatie', 'verwarming_eur', 'huur_meter_eur', 'totaal_eur', 'opmerking_periode', 'opmerking_meter'],
+    Object.values(S.meters).map(m => { const r = roomOf(m.room) || {}; return [S.settings.period || '', m.nr, m.unit, m.istaRoom, String(m.u || 0).replace('.', ','), m.room, r.name || '', orgOf(r) || '', ((m.u || 0) * price()).toFixed(2), rent().toFixed(2), meterCost(m).toFixed(2), m.rn || '', m.note || '']; }));
 }
 function refreshOrgUI() {
   const cur = $('#rOrg').value;
@@ -218,7 +230,7 @@ function renderPanel() {
       <div class="btns">${canWrite ? '<button class="btn primary" type="submit">Opslaan</button>' : '<span class="empty" style="font-size:12px">Alleen lezen</span>'}<span id="fMsg"></span></div>
     </form>
     <div><div class="sub">Ista-meters (${ms.length})</div>
-      ${ms.length ? `<ul class="mini">${ms.map(m => `<li><span class="mono">${esc(m.nr)}</span><span>${Number(m.units).toLocaleString('nl-BE')} eenh.</span><span class="num">${eur(meterCost(m))}</span></li>`).join('')}
+      ${ms.length ? `<ul class="mini">${ms.map(m => `<li><span class="mono">${esc(m.nr)}</span><span>${(m.u || 0).toLocaleString('nl-BE')} units</span><span class="num">${eur(meterCost(m))}</span></li>`).join('')}
         <li><b>Verwarming ${esc(S.settings.period)}</b><b class="num">${eur(heat)}</b></li></ul>` : '<p class="empty" style="margin:0;font-size:13px">Nog geen meter gekoppeld. Koppel meters in de tab Ista-meters.</p>'}</div>
     <div><div class="sub">Deuren (${doors.length})</div>${doors.length ? `<ul class="mini">${doors.map(d => `<li><span class="mono">${esc(d.code)}</span><span>${esc(d.fr === sel ? '→ ' + d.to : '← ' + d.fr)}</span><span>${d.checked ? '✓' : ''}</span></li>`).join('')}</ul>` : '<p class="empty" style="margin:0;font-size:13px">Geen deuren gekoppeld.</p>'}</div>
     ${r.oldCode ? `<p class="empty" style="margin:0;font-size:12px">Oude code: ${esc(r.oldCode)}${r.updatedAt ? ' · gewijzigd ' + new Date(r.updatedAt).toLocaleString('nl-BE') : ''}</p>` : ''}`;
@@ -307,57 +319,86 @@ function renderDoors() {
 const pnum = v => { let s = String(v ?? '').trim().replace(/[\s€]/g, ''); if (!s) return 0;
   if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.'); else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, ''); return Number(s) || 0; };
 function renderIsta() {
-  const st = S.settings; $('#istaPeriod').textContent = 'Afrekening ' + (st.period || '');
+  const st = S.settings, P0 = curP(); $('#istaPeriod').textContent = P0 ? 'Ista-periode ' + (st.period || P0.pkey) : 'Nog geen Ista-periode';
   const ms = Object.values(S.meters); const linked = ms.filter(m => m.room).length;
-  const totUnits = ms.reduce((s, m) => s + (Number(m.units) || 0), 0);
+  const totUnits = ms.reduce((s, m) => s + (m.u || 0), 0);
+  const nf = v => v ? String(v).replace('.', ',') : '';
   const inp = (id, v, w) => `<input id="${id}" value="${v}" style="width:${w}px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;background:var(--paper)">`;
-  $('#istaCards').innerHTML = (canWrite ? `
-    <div class="card"><span class="k">Ista-gegevens (aanpassen en Enter)</span>
-      <span class="k">Periode ${inp('iPer', esc(st.period || ''), 170)}</span>
-      <span class="k">Verwarmingskost € ${inp('iCost', st.heatCost ? String(st.heatCost).replace('.', ',') : '', 100)}</span>
-      <span class="k">Units totaal ${inp('iUnits', st.totalUnits ? String(st.totalUnits).replace('.', ',') : '', 110)} <button class="btn" id="iSum" title="Som van het verbruik van alle meters overnemen" style="font-size:11px">= som meters (${totUnits.toLocaleString('nl-BE')})</button></span>
-      <span class="k">${price().toLocaleString('nl-BE', { maximumFractionDigits: 6 })} € per unit</span></div>` : `
-    <div class="card"><span class="k">Verwarmingskost (Ista, incl. btw)</span><span class="v">${eur(st.heatCost)}</span><span class="k">${Number(st.totalUnits).toLocaleString('nl-BE')} units · ${price().toLocaleString('nl-BE', { maximumFractionDigits: 6 })} €/unit</span></div>`) + `
-    <div class="card"><span class="k">Huur kostenverdelers</span><span class="v">${eur(st.rentTotal)}</span><span class="k">${st.meterCount} meters · ${eur(rent())} per meter</span></div>
-    <div class="card"><span class="k">Meters gekoppeld aan een ruimte</span><span class="v">${linked} / ${ms.length}</span><div class="bar"><span style="width:${ms.length ? linked / ms.length * 100 : 0}%;background:var(--accent)"></span></div></div>`;
+  const psel = `<select id="iSel" aria-label="Ista-periode" style="font-weight:600">${PERIODS.length ? PERIODS.slice().reverse().map(p => `<option value="${esc(p.pkey)}"${p.pkey === CURP ? ' selected' : ''}>${esc(p.pkey)}${p.period ? ' (' + esc(p.period) + ')' : ''}${hasReads(p.pkey) ? '' : ' – nog leeg'}</option>`).join('') : '<option value="">– geen –</option>'}</select>`;
+  $('#istaCards').innerHTML = `
+    <div class="card"><span class="k">Ista-periode</span><span>${psel}</span>
+      <span class="k">Elk jaar een nieuwe periode met nieuwe cijfers van Ista. Oude periodes blijven bewaard.</span>
+      ${canWrite ? `<details id="iNewBox"><summary class="k" style="cursor:pointer;color:var(--accent)">+ Nieuwe periode</summary>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center"><label class="k">Van <input type="date" id="iNF"></label><label class="k">Tot <input type="date" id="iNT"></label><button class="btn" id="iNAdd" style="font-size:12px">Maak periode</button></div></details>` : ''}</div>` +
+    (canWrite && P0 ? `
+    <div class="card"><span class="k">Gegevens van deze periode (aanpassen en Enter)</span>
+      <span class="k">Periode ${inp('iPer', esc(st.period || ''), 190)}</span>
+      <span class="k">Verwarmingskost € ${inp('iCost', nf(st.heatCost), 100)}</span>
+      <span class="k">Units totaal ${inp('iUnits', nf(st.totalUnits), 110)} <button class="btn" id="iSum" title="Som van het verbruik van alle meters overnemen" style="font-size:11px">= som meters (${totUnits.toLocaleString('nl-BE')})</button></span>
+      <span class="k">${price().toLocaleString('nl-BE', { maximumFractionDigits: 6 })} € per unit${st.totalUnits && Math.abs(st.totalUnits - totUnits) > 1 ? ` · <b class="err">units totaal ≠ som meters</b>` : ''}</span></div>` : `
+    <div class="card"><span class="k">Verwarmingskost (Ista, incl. btw)</span><span class="v">${eur(st.heatCost)}</span><span class="k">${Number(st.totalUnits || 0).toLocaleString('nl-BE')} units · ${price().toLocaleString('nl-BE', { maximumFractionDigits: 6 })} €/unit</span></div>`) + `
+    <div class="card"><span class="k">Meters gekoppeld aan een ruimte</span><span class="v">${linked} / ${ms.length}</span><div class="bar"><span style="width:${ms.length ? linked / ms.length * 100 : 0}%;background:var(--accent)"></span></div><span class="k">Huur kostenverdelers: ${eur(st.rentTotal)} (${st.meterCount || 0} meters)</span></div>`;
   const opts = r => '<option value="">– kies ruimte –</option>' + GEO.floors.map(f => `<optgroup label="${esc(f.label)}">` + Object.values(S.rooms).filter(x => x.floor === f.id).sort((a, b) => a.code.localeCompare(b.code))
     .map(x => `<option value="${esc(x.code)}" ${x.code === r ? 'selected' : ''}>${esc(x.code)} · ${esc(x.name)}</option>`).join('') + '</optgroup>').join('');
-  const dis = canWrite ? '' : 'disabled';
-  $('#tIsta').innerHTML = `<thead><tr><th>Meternr</th><th>Unit</th><th>Ruimte (Ista)</th><th class="num">Verbruik</th><th>Ruimte in gebouw</th><th>Organisatie</th><th class="num">Verwarming</th><th class="num">Totaal</th><th>Opmerking</th></tr></thead><tbody>` +
-    ms.sort((a, b) => a.unit.localeCompare(b.unit) || a.nr.localeCompare(b.nr)).map(m => { const r = roomOf(m.room); return `<tr data-nr="${esc(m.nr)}"><td class="mono">${esc(m.nr)}</td><td class="mono">${esc(m.unit)}</td><td>${esc(m.istaRoom)}</td>
-      <td class="num mono">${canWrite ? `<input class="ivu" inputmode="decimal" value="${Number(m.units) || ''}" placeholder="0" aria-label="Verbruik meter ${esc(m.nr)}" style="width:80px;text-align:right">` : Number(m.units).toLocaleString('nl-BE')}</td><td><select ${dis} aria-label="Ruimte voor meter ${esc(m.nr)}" style="${m.room ? '' : 'border-color:var(--bad)'}">${opts(m.room)}</select>${r ? ` <button class="btn" data-go="${esc(r.code)}" style="padding:2px 8px;font-size:12px">plan</button>` : ''}</td>
+  const dis = canWrite ? '' : 'disabled', ed = canWrite && P0;
+  $('#tIsta').innerHTML = `<thead><tr><th>Meternr</th><th>Unit</th><th>Ruimte (Ista)</th><th class="num">Verbruik ${esc(CURP)}</th><th>Ruimte in gebouw</th><th>Organisatie</th><th class="num">Verwarming</th><th class="num">Totaal</th><th>Opmerking ${esc(CURP)}</th><th>Opmerking meter (vast)</th></tr></thead><tbody>` +
+    ms.sort((a, b) => String(a.nr).localeCompare(String(b.nr))).map(m => { const r = roomOf(m.room); return `<tr data-nr="${esc(m.nr)}"><td class="mono">${esc(m.nr)}</td><td class="mono">${esc(m.unit)}</td><td>${esc(m.istaRoom)}</td>
+      <td class="num mono">${ed ? `<input class="ivu" inputmode="decimal" value="${m.u ? String(m.u).replace('.', ',') : ''}" placeholder="0" aria-label="Verbruik meter ${esc(m.nr)}" style="width:96px;text-align:right">` : (m.u || 0).toLocaleString('nl-BE')}</td><td><select ${dis} aria-label="Ruimte voor meter ${esc(m.nr)}" style="${m.room ? '' : 'border-color:var(--bad)'}">${opts(m.room)}</select>${r ? ` <button class="btn" data-go="${esc(r.code)}" style="padding:2px 8px;font-size:12px">plan</button>` : ''}</td>
       <td>${orgOf(r) ? `<span class="swatch" style="background:${orgColor(orgOf(r))}"></span>${esc(orgOf(r))}` : (r ? '<span class="empty">–</span>' : '')}</td>
-      <td class="num mono">${eur((Number(m.units) || 0) * price())}</td><td class="num mono">${eur(meterCost(m))}</td><td class="wrap">${canWrite ? `<input class="inote" value="${esc(m.note || '')}" placeholder="opmerking" aria-label="Opmerking meter ${esc(m.nr)}" style="width:100%;min-width:200px;font-size:12px">` : esc(m.note)}</td></tr>`; }).join('') +
-    `</tbody><tfoot><tr><th colspan="3">Totaal</th><th class="num mono">${totUnits.toLocaleString('nl-BE')}</th><th colspan="2"></th><th class="num mono">${eur(totUnits * price())}</th><th class="num mono">${eur(ms.reduce((s, m) => s + meterCost(m), 0))}</th><th></th></tr></tfoot>`;
+      <td class="num mono">${eur((m.u || 0) * price())}</td><td class="num mono">${eur(meterCost(m))}</td>
+      <td class="wrap">${ed ? `<input class="inote" value="${esc(m.rn || '')}" placeholder="bv. schatting" aria-label="Opmerking ${esc(CURP)} meter ${esc(m.nr)}" style="width:100%;min-width:170px;font-size:12px">` : esc(m.rn)}</td>
+      <td class="wrap">${canWrite ? `<input class="imnote" value="${esc(m.note || '')}" placeholder="opmerking" aria-label="Vaste opmerking meter ${esc(m.nr)}" style="width:100%;min-width:170px;font-size:12px;color:var(--muted)">` : esc(m.note)}</td></tr>`; }).join('') +
+    `</tbody><tfoot><tr><th colspan="3">Totaal</th><th class="num mono">${totUnits.toLocaleString('nl-BE')}</th><th colspan="2"></th><th class="num mono">${eur(totUnits * price())}</th><th class="num mono">${eur(ms.reduce((s, m) => s + meterCost(m), 0))}</th><th colspan="2"></th></tr></tfoot>`;
+  const fail = (el, er) => { if (el) el.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); };
   $('#tIsta').onchange = async e => {
-    const iv = e.target.closest('input.ivu');
-    const nt = e.target.closest('input.inote');
-    if (nt) { const nr = nt.closest('tr').dataset.nr, body = { ...S.meters[nr], note: nt.value.trim() };
-      try { await save('meters', nr, body); S.meters[nr] = body; } catch (er) { nt.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); } return; }
-    if (iv) { const nr = iv.closest('tr').dataset.nr, v = pnum(iv.value), body = { ...S.meters[nr], units: v };
-      try { await save('meters', nr, body); S.meters[nr] = body; PSC = {}; renderAll(true); } catch (er) { iv.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); } return; }
-    const s = e.target.closest('select'); if (!s) return; const nr = s.closest('tr').dataset.nr; const body = { ...S.meters[nr], room: s.value };
-    try { await save('meters', nr, body); S.meters[nr] = body; renderAll(true); } catch (er) { s.style.outline = '2px solid var(--bad)'; setStatus('ro', 'Niet opgeslagen: ' + (er.code || er.message)); } };
+    const tr = e.target.closest('tr'); if (!tr || !tr.dataset.nr) return; const nr = tr.dataset.nr;
+    const iv = e.target.closest('input.ivu'), nt = e.target.closest('input.inote'), mn = e.target.closest('input.imnote');
+    if (iv || nt) { try { await saveRead(nr, iv ? { units: pnum(iv.value) } : { note: nt.value.trim() }); PSC = {}; if (iv) renderAll(true); } catch (er) { fail(iv || nt, er); } return; }
+    if (mn) { const body = { ...S.meters[nr], note: mn.value.trim() }; try { await save('meters', nr, body); S.meters[nr].note = body.note; } catch (er) { fail(mn, er); } return; }
+    const s = e.target.closest('select'); if (!s) return; const body = { ...S.meters[nr], room: s.value };
+    try { await save('meters', nr, body); S.meters[nr].room = s.value; PSC = {}; renderAll(true); } catch (er) { fail(s, er); } };
   $('#tIsta').onclick = e => { const b = e.target.closest('[data-go]'); if (b) select(b.dataset.go); };
+  $('#iSel').onchange = () => { CURP = $('#iSel').value; applyCur(); renderAll(true); };
   if (!canWrite) { $('#istaNew').innerHTML = ''; return; }
-  const saveSet = async ch => { const o = { ...S.settings, ...ch, key: 'ista' };
-    try { await LK.save('settings', o); S.settings = { ...o }; PSC = {}; renderAll(true); } catch (er) { setStatus('ro', 'Ista-gegevens niet opgeslagen: ' + er.message); } };
-  $('#iPer').onchange = () => saveSet({ period: $('#iPer').value.trim() });
+  { const last = PERIODS[PERIODS.length - 1]; if (last && last.to) { $('#iNF').value = addDays(last.to, 1); const t = addDays(last.to, 1); $('#iNT').value = addDays((+t.slice(0, 4) + 1) + t.slice(4), -1); } }
+  $('#iNAdd').onclick = async () => {
+    const f = $('#iNF').value, t = $('#iNT').value; if (!f || !t || t < f) { setStatus('ro', 'Kies een geldige periode (van – tot)'); return; }
+    const period = dfmt(f) + ' – ' + dfmt(t), pk = pkeyOf(period);
+    if (PERIODS.some(p => p.pkey === pk)) { setStatus('ro', 'Periode ' + pk + ' bestaat al'); return; }
+    const prev = PERIODS[PERIODS.length - 1] || {}, o = { key: 'ista:' + pk, period, heatCost: 0, totalUnits: 0, rentTotal: prev.rentTotal || 0, meterCount: prev.meterCount || 0 };
+    try { await LK.save('settings', o); PERIODS.push({ ...o, pkey: pk, from: f, to: t }); PERIODS.sort((a, b) => (a.from || '').localeCompare(b.from || '')); CURP = pk; applyCur(); PSC = {}; renderAll(true); setStatus('live', 'Nieuwe Ista-periode ' + pk + ' gemaakt – vul de cijfers van Ista in'); }
+    catch (er) { setStatus('ro', 'Periode niet gemaakt: ' + er.message); }
+  };
+  if (!P0) { $('#istaNew').innerHTML = '<span class="empty">Maak eerst een Ista-periode (kaart links boven).</span>'; return; }
+  const saveSet = async ch => { const p = curP(), o = { _id: p._id, key: p.key, ...ch };
+    try { await LK.save('settings', o); Object.assign(p, ch); if (ch.period) { const d = pdates(ch.period); if (d) Object.assign(p, d); } applyCur(); PSC = {}; renderAll(true); } catch (er) { setStatus('ro', 'Ista-gegevens niet opgeslagen: ' + er.message); } };
+  $('#iPer').onchange = () => { const v = $('#iPer').value.trim(); if (pkeyOf(v) !== CURP) { setStatus('ro', 'De jaren van de periode kunnen niet veranderen – maak een nieuwe periode'); $('#iPer').value = S.settings.period || ''; return; } saveSet({ period: v }); };
   $('#iCost').onchange = () => saveSet({ heatCost: pnum($('#iCost').value) });
   $('#iUnits').onchange = () => saveSet({ totalUnits: pnum($('#iUnits').value) });
   $('#iSum').onclick = () => saveSet({ totalUnits: Math.round(totUnits * 100) / 100 });
   $('#istaNew').innerHTML = `<b>Meter toevoegen</b>
     <input id="nNr" placeholder="Meternummer" style="width:120px"> <input id="nUnit" placeholder="Ista-groep (bv. 0016)" style="width:140px">
     <input id="nIr" placeholder="Ruimte volgens Ista" style="width:150px"> <select id="nRoom">${opts('')}</select>
-    <input id="nUnits" inputmode="decimal" placeholder="Verbruik" style="width:100px"> <input id="nNote" placeholder="Opmerking (bv. schatting)" style="width:220px">
+    <input id="nUnits" inputmode="decimal" placeholder="Verbruik ${esc(CURP)}" style="width:130px"> <input id="nNote" placeholder="Opmerking (bv. schatting)" style="width:200px">
     <button class="btn" id="nAdd">Toevoegen</button>`;
   $('#nAdd').onclick = async () => {
     const nr = $('#nNr').value.trim(); if (!nr) { setStatus('ro', 'Vul het meternummer in'); return; }
     if (S.meters[nr]) { setStatus('ro', 'Meter ' + nr + ' bestaat al – pas het verbruik aan in de tabel'); return; }
-    const o = { nr, unit: $('#nUnit').value.trim(), istaRoom: $('#nIr').value.trim(), room: $('#nRoom').value, units: pnum($('#nUnits').value), note: $('#nNote').value.trim() };
-    try { await LK.save('meters', o); S.meters[nr] = o; PSC = {}; renderAll(true); setStatus('live', 'Meter ' + nr + ' toegevoegd'); }
+    const o = { nr, unit: $('#nUnit').value.trim(), istaRoom: $('#nIr').value.trim(), room: $('#nRoom').value, note: '' };
+    try { await LK.save('meters', o); S.meters[nr] = o; const u = pnum($('#nUnits').value), n = $('#nNote').value.trim(); if (u || n) await saveRead(nr, { units: u, note: n }); applyCur(); PSC = {}; renderAll(true); setStatus('live', 'Meter ' + nr + ' toegevoegd'); }
     catch (er) { setStatus('ro', 'Meter niet toegevoegd: ' + (er.status === 403 ? 'geen bewerkrechten' : er.message)); }
   };
+}
+// meterstand van de gekozen periode bewaren (LK_IstaStanden); oude periode eerst volledig overzetten
+async function saveRead(nr, ch) {
+  if (!READS_OK) { const e = new Error('lijst LK_IstaStanden ontbreekt'); throw e; }
+  const pk = CURP; if (!pk) throw new Error('geen Ista-periode gekozen');
+  if (isLegacy(pk)) { const rows = Object.values(S.meters).filter(m => Number(m.units) || m.nr === nr).map(m => ({ nr: m.nr, pkey: pk, units: Number(m.units) || 0, note: '' }));
+    await LK.batch(rows.map(o => ({ kind: 'reads', op: 'add', obj: o })));
+    READS[pk] = {}; for (const r of await LK.load('reads') || []) if (r.nr && r.pkey) (READS[r.pkey] || (READS[r.pkey] = {}))[r.nr] = r; }
+  const cur = (READS[pk] || {})[nr], o = { ...(cur || { nr, pkey: pk, units: 0, note: '' }), ...ch };
+  await LK.save('reads', o); (READS[pk] || (READS[pk] = {}))[nr] = o; applyCur();
+  setStatus('live', 'Opgeslagen in SharePoint · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }));
 }
 function orgUse(n) {
   const has = s => String(s || '').split(' + ').includes(n), u = [];
@@ -497,6 +538,29 @@ function presentShares(A, B, equal, noOvm) {
   }
   return (PSC[ck] = out);   // som = aantal dagen
 }
+// Ista-verdeling binnen [A, B] met de meterstanden van één Ista-periode
+function istaW(pk, A, B) {
+  const P = dnum(B) - dnum(A) + 1, w = {};
+  for (const m of Object.values(S.meters)) {
+    const r = roomOf(m.room), u = Number(rd(m, pk)?.units) || 0; if (!r || !u) continue;
+    if (r.use === 'Verhuurbaar') { let used = 0; for (const [o, d] of Object.entries(orgDays(r, A, B))) { w[o] = (w[o] || 0) + u * d / P; used += d; } if (used < P) w['De Overmolen'] = (w['De Overmolen'] || 0) + u * (P - used) / P; }
+    else for (const [o, s] of Object.entries(presentShares(A, B, false))) w[o] = (w[o] || 0) + u * s / P;
+  }
+  return w;
+}
+// welke Ista-periode(s) gelden voor [A, B]; dagen zonder Ista-periode → dichtstbijzijnde periode (fb = terugval)
+function istaSegs(A, B) {
+  const ps = PERIODS.filter(p => p.from && p.to && hasReads(p.pkey)); if (!ps.length) return [];
+  const segs = [];
+  for (const p of ps) { const a = p.from > A ? p.from : A, b = p.to < B ? p.to : B; if (a <= b) segs.push({ p, a, b, fb: false }); }
+  segs.sort((x, y) => x.a.localeCompare(y.a));
+  const gaps = []; let cur = A;
+  for (const g of segs) { if (g.a > cur) gaps.push([cur, addDays(g.a, -1)]); if (addDays(g.b, 1) > cur) cur = addDays(g.b, 1); }
+  if (cur <= B) gaps.push([cur, B]);
+  for (const [a, b] of gaps) { const near = ps.slice().sort((x, y) => Math.min(Math.abs(dnum(x.from) - dnum(b)), Math.abs(dnum(x.to) - dnum(a))) - Math.min(Math.abs(dnum(y.from) - dnum(b)), Math.abs(dnum(y.to) - dnum(a))))[0]; segs.push({ p: near, a, b, fb: true }); }
+  return segs.sort((x, y) => x.a.localeCompare(y.a));
+}
+const istaInfo = (A, B) => istaSegs(A, B).map(g => `${g.fb ? '⚠ ' : ''}${dfmt(g.a)}–${dfmt(g.b)}: Ista ${g.p.pkey}${g.fb ? ' (geen Ista-cijfers voor deze dagen, verdeeld zoals Ista ' + g.p.pkey + ')' : ''}`).join(' · ');
 const eur2 = n => (Math.round(n * 100) / 100).toLocaleString('nl-BE', { style: 'currency', currency: 'EUR' });
 function weights(key, A, B, org) {
   const P = dnum(B) - dnum(A) + 1, w = {};
@@ -504,14 +568,10 @@ function weights(key, A, B, org) {
     const sel = String(org || '').split(' + ').map(s => s.trim()).filter(Boolean); if (sel.length < 2) { if (sel[0]) w[sel[0]] = 1; return w; }
     const ps = presentShares(A, B, false, true); let s = 0; for (const o of sel) { w[o] = ps[o] || 0; s += w[o]; } if (!s) for (const o of sel) w[o] = 1; return w;
   }
-  if (key === KEYS[1]) {   // meter in ruimte van een organisatie → die organisatie; leeg → De Overmolen; gemeenschappelijke ruimte → aanwezigen
-    for (const m of Object.values(S.meters)) {
-      const r = roomOf(m.room), u = Number(m.units) || 0; if (!r || !u) continue;
-      if (r.use === 'Verhuurbaar') { let used = 0; for (const [o, d] of Object.entries(orgDays(r, A, B))) { w[o] = (w[o] || 0) + u * d / P; used += d; } if (used < P) w['De Overmolen'] = (w['De Overmolen'] || 0) + u * (P - used) / P; }
-      else for (const [o, s] of Object.entries(presentShares(A, B, false))) w[o] = (w[o] || 0) + u * s / P;
-    }
-    if (Object.values(w).reduce((a, b) => a + b, 0) > 0) return w;
-    return { [WAIT]: 1 };   // nog geen Ista-verbruik ingevuld: niet verdelen, wacht op de Ista-verdeling
+  if (key === KEYS[1]) {   // per Ista-periode die de kost overlapt: verbruik van die periode, gewogen naar het aantal dagen
+    const segs = istaSegs(A, B); if (!segs.length) return { [WAIT]: 1 };   // nog geen Ista-verbruik ingevuld: niet verdelen
+    for (const g of segs) { const ws = istaW(g.p.pkey, g.a, g.b), T = Object.values(ws).reduce((x, y) => x + y, 0), d = dnum(g.b) - dnum(g.a) + 1; if (T > 0) for (const [o, v] of Object.entries(ws)) w[o] = (w[o] || 0) + d * v / T; }
+    return Object.values(w).reduce((a, b) => a + b, 0) > 0 ? w : { [WAIT]: 1 };
   }
   if (key === KEYS[6] || key === KEYS[1]) {   // bezette m²: alles over wie er die dag is (naar m²); ruimten op naam van De Overmolen / leegstand betalen niets. Ook terugval voor Ista zonder gekoppelde meters
     for (const [o, s] of Object.entries(presentShares(A, B, false, true))) w[o] = (w[o] || 0) + s;
@@ -599,7 +659,7 @@ function orgPdf(sel) {
       ${rentInfo(o)}
       ${rows.length ? `<h2>Per categorie</h2><table class="sum"><tbody>${Object.entries(cat).map(([k, n]) => `<tr><td>${esc(k)}</td><td class="num">${eur2(n)}</td></tr>`).join('')}</tbody></table>
       <h2>Detail kostenposten</h2><table><thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Verdeelsleutel</th><th class="num">Uw aandeel</th></tr></thead><tbody>` +
-        rows.map(({ c, sh }) => `<tr><td>${esc(c.cat)}</td><td>${esc(c.desc)}${c.supplier || c.invoice ? `<br><span class="sml">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice].filter(Boolean).join(' · '))}</span>` : ''}</td><td style="white-space:nowrap">${dfmt(ovl(c).A)} – ${dfmt(ovl(c).B)}</td><td class="num">${eur2(amtIn(c))}</td><td>${esc(SIMKEY && c.key !== KEYS[3] ? SIMKEY : c.key || KDEF)}</td><td class="num">${eur2(sh)}</td></tr>`).join('') +
+        rows.map(({ c, sh }) => `<tr><td>${esc(c.cat)}</td><td>${esc(c.desc)}${c.supplier || c.invoice ? `<br><span class="sml">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice].filter(Boolean).join(' · '))}</span>` : ''}</td><td style="white-space:nowrap">${dfmt(ovl(c).A)} – ${dfmt(ovl(c).B)}</td><td class="num">${eur2(amtIn(c))}</td><td>${esc(SIMKEY && c.key !== KEYS[3] ? SIMKEY : c.key || KDEF)}${keyOf(c) === KEYS[1] && PERIODS.length ? '<br><span class="sml">' + esc(istaInfo(ovl(c).A, ovl(c).B).replace(/⚠ /g, '')) + '</span>' : ''}</td><td class="num">${eur2(sh)}</td></tr>`).join('') +
         `</tbody><tfoot><tr><th colspan="5">Totaal aandeel</th><th class="num">${eur2(sh)}</th></tr></tfoot></table>` : '<p>Geen kosten aangerekend in deze periode.</p>'}
       <p class="pf">Bedragen incl. btw (niet aftrekbaar voor De Overmolen). Bedragen = deel van elke kostenpost dat in de periode valt, verdeeld volgens de vermelde sleutel. Voorschotten = betalingen met boekdatum in de periode.</p></section>`;
   }).join('');
@@ -609,7 +669,7 @@ function orgPdf(sel) {
 }
 function afrOrgs(cs) { const set = new Set(); cs.forEach(c => Object.keys(split(c)).forEach(o => set.add(o))); return [...ORGS.map(o => o.name).filter(n => set.has(n)), ...[...set].filter(n => !ORGS.some(o => o.name === n))]; }
 function renderAfr() {
-  if (!per || !$('#v-afr')) return; bindAfr(); bindImport(); PSC = {};
+  if (!per || !$('#v-afr')) return; bindAfr(); bindImport(); bindCorr(); PSC = {};
   const li = IMPS.slice().sort((a, b) => (b._id | 0) - (a._id | 0))[0];
   $('#afrLog').innerHTML = li ? `Laatste import: <b>${esc(li.file)}</b> op ${esc(li.at)} (boekdatum ${dfmt(li.from)} – ${dfmt(li.to)}, ${li.added || 0} nieuw, ${li.changed || 0} bijgewerkt, ${li.removed || 0} verwijderd) · ${IMPS.length} import(s) in totaal` : 'Nog geen import uit Exact.';
   $('#aFrom').value = per.from; $('#aTo').value = per.to;
@@ -659,10 +719,11 @@ function renderAfr() {
     $('#rulesBox').onclick = async e => { const b = e.target.closest('.rdel'); if (!b) return; delete RULES[b.dataset.k]; await saveRules(); renderAfr(); };
   }
   $('#tAfr').innerHTML = cs.length ? `<thead><tr><th>Categorie</th><th>Omschrijving</th><th>Periode</th><th class="num">Bedrag</th><th>Sleutel</th>${orgs.map(o => `<th class="num"><span class="swatch" style="background:${orgColor(o) || '#ddd'}"></span>${esc(o)}</th>`).join('')}<th></th></tr></thead><tbody>` +
-    cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td>${canWrite ? `<select class="ce" data-f="cat">${[...new Set([...CATS, c.cat || ''])].filter(Boolean).map(x => `<option${x === c.cat ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : esc(c.cat)}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.entry && 'boekstuk ' + c.entry, c.gl, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}${c.cu && !/^huurpat$/i.test(c.cu) ? '<br><span class="imp-warn">⚠ geen HUURPAT in Exact</span>' : ''}</td>
-      <td class="mono" style="font-size:12px;white-space:nowrap">${canWrite ? `<input type="date" class="ce" data-f="from" value="${c.from || ''}"><br><input type="date" class="ce" data-f="to" value="${c.to || ''}">` : dfmt(c.from) + '<br>' + dfmt(c.to)}</td><td class="num mono">${eur2(amtIn(c))}<br><span class="empty" style="font-size:10px">excl. ${eur2(Number(c.amount) || 0)} + btw ${canWrite ? `<select class="ce" data-f="vat" style="font-size:10px;padding:0">${[0, 6, 21].map(v => `<option value="${v}"${v === (Number(c.vat) || 0) ? ' selected' : ''}>${v}%</option>`).join('')}</select>` : (Number(c.vat) || 0) + '%'} = ${eur2(amtIn(c) - (Number(c.amount) || 0) * ovl(c).f)}${ovl(c).f < 0.9999 ? ` · ${Math.round(ovl(c).f * 100)}%` : ''}</span></td><td style="font-size:12px">${canWrite ? `<select class="ce" data-f="key">${KEYS.map(k => `<option${k === (c.key || KDEF) ? ' selected' : ''}>${esc(k)}</option>`).join('')}</select>${c.key === KEYS[3] ? `<div style="margin-top:4px;line-height:1.5">${ORGS.map(o => `<label style="display:block;white-space:nowrap"><input type="checkbox" class="ce" data-f="orgs" value="${esc(o.name)}"${String(c.org || '').split(' + ').includes(o.name) ? ' checked' : ''}> ${esc(o.name)}</label>`).join('')}${String(c.org || '').includes(' + ') ? '<span class="empty" style="font-size:10px">verdeeld naar bezette m²</span>' : ''}</div>` : ''}` : esc(c.key) + (c.org ? '<br><b>' + esc(c.org) + '</b>' : '')}${SIMKEY && c.key !== KEYS[3] ? '<br><span class="imp-warn">simulatie: ' + esc(SIMKEY) + '</span>' : ''}</td>
+    cs.map(c => { const sp = split(c); return `<tr data-id="${esc(c._id)}"><td class="${corrTd(c, ['cat', 'del'])}">${canWrite ? `<select class="ce" data-f="cat">${[...new Set([...CATS, c.cat || ''])].filter(Boolean).map(x => `<option${x === c.cat ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : esc(c.cat)}${corrMark(c, ['cat'])}</td><td class="wrap">${esc(c.desc)}${c.supplier || c.invoice || c.meter ? `<br><span class="empty" style="font-size:11px">${esc([c.supplier, c.invoice && 'factuur ' + c.invoice, c.entry && 'boekstuk ' + c.entry, c.gl, c.meter && 'meter ' + c.meter].filter(Boolean).join(' · '))}</span>` : ''}${c.cu && !/^huurpat$/i.test(c.cu) ? '<br><span class="imp-warn">⚠ geen HUURPAT in Exact</span>' : ''}</td>
+      <td class="mono ${corrTd(c, ['from', 'to'])}" style="font-size:12px;white-space:nowrap">${canWrite ? `<input type="date" class="ce" data-f="from" value="${c.from || ''}"><br><input type="date" class="ce" data-f="to" value="${c.to || ''}">` : dfmt(c.from) + '<br>' + dfmt(c.to)}${corrMark(c, ['from', 'to'])}</td><td class="num mono ${corrTd(c, ['vat'])}">${corrMark(c, ['vat'])}${eur2(amtIn(c))}<br><span class="empty" style="font-size:10px">excl. ${eur2(Number(c.amount) || 0)} + btw ${canWrite ? `<select class="ce" data-f="vat" style="font-size:10px;padding:0">${[0, 6, 21].map(v => `<option value="${v}"${v === (Number(c.vat) || 0) ? ' selected' : ''}>${v}%</option>`).join('')}</select>` : (Number(c.vat) || 0) + '%'} = ${eur2(amtIn(c) - (Number(c.amount) || 0) * ovl(c).f)}${ovl(c).f < 0.9999 ? ` · ${Math.round(ovl(c).f * 100)}%` : ''}</span></td><td class="${corrTd(c, ['key', 'org'])}" style="font-size:12px">${corrMark(c, ['key', 'org'])}${canWrite ? `<select class="ce" data-f="key">${KEYS.map(k => `<option${k === (c.key || KDEF) ? ' selected' : ''}>${esc(k)}</option>`).join('')}</select>${c.key === KEYS[3] ? `<div style="margin-top:4px;line-height:1.5">${ORGS.map(o => `<label style="display:block;white-space:nowrap"><input type="checkbox" class="ce" data-f="orgs" value="${esc(o.name)}"${String(c.org || '').split(' + ').includes(o.name) ? ' checked' : ''}> ${esc(o.name)}</label>`).join('')}${String(c.org || '').includes(' + ') ? '<span class="empty" style="font-size:10px">verdeeld naar bezette m²</span>' : ''}</div>` : ''}` : esc(c.key) + (c.org ? '<br><b>' + esc(c.org) + '</b>' : '')}${SIMKEY && c.key !== KEYS[3] ? '<br><span class="imp-warn">simulatie: ' + esc(SIMKEY) + '</span>' : ''}${keyOf(c) === KEYS[1] && PERIODS.length ? `<br><span class="${/⚠/.test(istaInfo(ovl(c).A, ovl(c).B)) ? 'imp-warn' : 'empty'}" style="font-size:10px">${esc(istaInfo(ovl(c).A, ovl(c).B))}</span>` : ''}</td>
       ${orgs.map(o => `<td class="num mono">${sp[o] ? eur2(sp[o]) : '–'}</td>`).join('')}<td>${canWrite ? '<button class="occdel cdel" title="Verwijderen">✕</button>' : ''}</td></tr>`; }).join('') +
     `</tbody><tfoot><tr><th colspan="3">Totaal</th><th class="num mono">${eur2(total)}</th><th></th>${orgs.map(o => `<th class="num mono">${eur2(tot[o] || 0)}</th>`).join('')}<th></th></tr></tfoot>` : '<tbody><tr><td class="empty">Nog geen kostenposten in deze periode. Voeg ze hierboven toe.</td></tr></tbody>';
+  renderCorr();
   $('#tAfr').onchange = async e => {
     const el = e.target.closest('.ce'); if (!el) return; const tr = el.closest('tr'), c = COSTS.find(x => String(x._id) === tr.dataset.id); if (!c) return;
     let f = el.dataset.f; const patch = { _id: c._id, [f]: f === 'vat' ? Number(el.value) : el.value };
@@ -670,15 +731,94 @@ function renderAfr() {
     if (f === 'key') { patch.org = el.value === KEYS[3] ? (c.org || 'De Overmolen') : ''; }
     if (f === 'cat') { /* enkel categorie */ }
     if ((f === 'from' && el.value > (c.to || '9')) || (f === 'to' && el.value < (c.from || '0'))) { setStatus('ro', "'Tot' ligt vóór 'Van' – niet opgeslagen"); renderAfr(); return; }
-    try { await LK.save('costs', patch); Object.assign(c, patch); PSC = {}; if (c.src === 'Exact' && /cat|key|org/.test(f)) { learn(c, { cat: c.cat, key: c.key, org: c.key === KEYS[3] ? c.org : '' }); saveRules(); } renderAfr(); setStatus('live', 'Kostenpost aangepast · herberekend · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); }
+    const before = { ...c };
+    try { await LK.save('costs', patch); Object.assign(c, patch); PSC = {}; if (c.src === 'Exact' && /cat|key|org/.test(f)) { learn(c, { cat: c.cat, key: c.key, org: c.key === KEYS[3] ? c.org : '' }); saveRules(); }
+      for (const k of Object.keys(patch)) if (k !== '_id' && String(before[k] ?? '') !== String(c[k] ?? '')) await logCorr(c, k, before[k], c[k]);
+      renderAfr(); setStatus('live', 'Kostenpost aangepast · herberekend · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); }
     catch (er) { setStatus('ro', 'Niet opgeslagen: ' + (er.status === 403 ? 'geen bewerkrechten' : er.message)); renderAfr(); }
   };
   $('#tAfr').onclick = async e => {
     const b = e.target.closest('.cdel'); if (!b) return; const tr = b.closest('tr');
     if (!tr.dataset.confirm) { tr.dataset.confirm = 1; b.textContent = 'Zeker?'; b.style.width = 'auto'; return; }
     const c = COSTS.find(x => String(x._id) === tr.dataset.id); if (!c) return;
-    try { await LK.remove('costs', c._id); COSTS = COSTS.filter(x => x !== c); if (c.src === 'Exact') { learn(c, { on: false }); saveRules(); } renderAfr(); } catch (er) { setStatus('ro', 'Niet verwijderd: ' + er.message); }
+    try { await LK.remove('costs', c._id); COSTS = COSTS.filter(x => x !== c); await logCorr(c, 'del', 'in de afrekening', 'verwijderd uit de afrekening'); if (c.src === 'Exact') { learn(c, { on: false }); saveRules(); } renderAfr(); } catch (er) { setStatus('ro', 'Niet verwijderd: ' + er.message); }
   };
+}
+// ---------- correcties voor de boekhouding: elke wijziging aan een Exact-lijn wordt bewaard (oud → nieuw, wie, wanneer, reden)
+// rood = nog aan te passen in Exact · groen = de boekhouder heeft "Aangepast in Exact" aangevinkt
+const CF = { cat: 'Categorie', from: 'Periode van', to: 'Periode tot', vat: 'Btw', key: 'Verdeelsleutel', org: 'Organisatie / eigenaar of huurder', del: 'Niet in de afrekening (geen huurderskost)' };
+const cfv = (f, v) => v === '' || v == null ? '(leeg)' : /^(from|to)$/.test(f) ? dfmt(v) : f === 'vat' ? v + '%' : String(v);
+const nowTxt = () => { const d = new Date(); return ymd(d) + ' ' + d.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' }); };
+const corrOf = (c, fs) => CORR.filter(x => x.cid === String(c._id) && (!fs || fs.includes(x.field)));
+function corrMark(c, fs) {
+  const L = corrOf(c, fs); if (!L.length) return '';
+  const open = L.some(x => !x.done), t = L.map(x => `${CF[x.field] || x.field}: ${cfv(x.field, x.old)} → ${cfv(x.field, x.new)}${x.done ? ' · aangepast in Exact' : ' · nog aan te passen in Exact'}`).join('\n');
+  return ` <button class="cmk ${open ? 'open' : 'done'}" data-cid="${esc(c._id)}" title="${esc(t)}" aria-label="Correctie bekijken">${open ? '●' : '✓'}</button>`;
+}
+const corrTd = (c, fs) => { const L = corrOf(c, fs); return L.length ? (L.some(x => !x.done) ? 'c-open' : 'c-done') : ''; };
+async function logCorr(c, f, oldV, newV) {
+  if (!CORR_OK || c.src !== 'Exact') return;
+  oldV = oldV == null ? '' : String(oldV); newV = newV == null ? '' : String(newV);
+  const ex = CORR.find(x => x.cid === String(c._id) && x.field === f && !x.done);
+  try {
+    if (ex) { if (newV === ex.old) { await LK.remove('corr', ex._id); CORR = CORR.filter(x => x !== ex); } else { ex.new = newV; ex.who = $('#who').textContent; ex.at = nowTxt(); await LK.save('corr', { _id: ex._id, new: newV, who: ex.who, at: ex.at }); } return; }
+    if (oldV === newV) return;
+    const o = { cid: String(c._id), desc: `${c.desc || ''} · ${eur2(Number(c.amount) || 0)} excl. btw${c.bdate ? ' · boekdatum ' + dfmt(c.bdate) : ''}`.slice(0, 250), entry: c.entry || c.invoice || '', field: f, old: oldV, new: newV, reason: '', who: $('#who').textContent, at: nowTxt(), done: false, doneBy: '', doneAt: '' };
+    await LK.save('corr', o); CORR.push(o);
+  } catch (er) { setStatus('ro', 'Correctie niet bewaard: ' + er.message); }
+}
+async function setCorr(x, ch) {
+  try { await LK.save('corr', { _id: x._id, ...ch }); Object.assign(x, ch); setStatus('live', 'Correctie bewaard · ' + nowTxt().slice(11)); }
+  catch (er) { setStatus('ro', 'Niet bewaard: ' + (er.status === 403 ? 'geen rechten op LK_Correcties' : er.message)); throw er; }
+}
+const corrRow = (x, pop) => `<tr data-k="${esc(x._id)}" class="${x.done ? 'c-done' : 'c-open'}">
+  <td><label class="check" title="Aanvinken als dit in Exact is aangepast"><input type="checkbox" class="cdone"${x.done ? ' checked' : ''}> ${x.done ? 'Aangepast in Exact' : '<b>Nog aanpassen</b>'}</label>${x.done && x.doneBy ? `<br><span class="empty" style="font-size:11px">${esc(x.doneBy)} · ${esc(x.doneAt)}</span>` : ''}</td>
+  ${pop ? '' : `<td class="wrap">${esc(x.desc)}${x.entry ? `<br><span class="empty" style="font-size:11px">boekstuk ${esc(x.entry)}</span>` : ''}</td>`}
+  <td><b>${esc(CF[x.field] || x.field)}</b></td><td class="mono">${esc(cfv(x.field, x.old))}</td><td class="mono"><b>${esc(cfv(x.field, x.new))}</b></td>
+  <td><input class="creason" value="${esc(x.reason || '')}" placeholder="Waarom? (reden)" style="width:100%;min-width:160px;font-size:12px"></td>
+  <td style="font-size:12px">${esc(x.who)}<br><span class="empty">${esc(x.at)}</span></td></tr>`;
+async function corrChange(e) {
+  const tr = e.target.closest('tr[data-k]'); if (!tr) return; const x = CORR.find(y => String(y._id) === tr.dataset.k); if (!x) return;
+  try {
+    if (e.target.classList.contains('cdone')) await setCorr(x, e.target.checked ? { done: true, doneBy: $('#who').textContent, doneAt: nowTxt() } : { done: false, doneBy: '', doneAt: '' });
+    else if (e.target.classList.contains('creason')) await setCorr(x, { reason: e.target.value.trim() });
+  } catch (er) {}
+  renderAfr(); if (!$('#corrPop').hidden) openCorr($('#corrPop').dataset.cid);
+}
+function openCorr(cid) {
+  const c = COSTS.find(x => String(x._id) === String(cid)), L = CORR.filter(x => x.cid === String(cid)), pop = $('#corrPop');
+  if (!L.length) { pop.hidden = true; return; }
+  pop.dataset.cid = cid; pop.hidden = false;
+  pop.innerHTML = `<div style="display:flex;justify-content:space-between;gap:12px;align-items:start"><div><b>Correcties</b><br><span class="empty" style="font-size:12px">${esc(c ? c.desc : L[0].desc)}</span></div><button class="btn" id="corrClose" style="padding:2px 10px">✕</button></div>
+    <table style="margin-top:8px"><thead><tr><th>Status</th><th>Wat</th><th>Was (Exact)</th><th>Wordt</th><th>Reden</th><th>Door</th></tr></thead><tbody>${L.map(x => corrRow(x, true)).join('')}</tbody></table>
+    <p class="empty" style="font-size:12px;margin:8px 0 0">Rood = nog aan te passen in Exact. De boekhouder vinkt "Aangepast in Exact" aan → groen.</p>`;
+  $('#corrClose').onclick = () => { pop.hidden = true; };
+  pop.onchange = corrChange;
+}
+function renderCorr() {
+  if (!$('#tCorr')) return;
+  if (!CORR_OK) { $('#corrInfo').innerHTML = '<span class="imp-warn">De lijst LK_Correcties bestaat nog niet in SharePoint.</span>'; $('#tCorr').innerHTML = ''; return; }
+  const f = $('#corrF').value || 'open', L = CORR.filter(x => f === 'alle' || (f === 'open' ? !x.done : x.done)).sort((a, b) => (a.done - b.done) || String(b.at).localeCompare(String(a.at)));
+  const nO = CORR.filter(x => !x.done).length, nD = CORR.length - nO;
+  $('#corrInfo').innerHTML = `<b class="${nO ? 'err' : 'saved'}" style="font-size:13px">${nO} nog aan te passen in Exact</b> · <span class="saved" style="font-size:13px">${nD} aangepast</span>`;
+  $('#tCorr').innerHTML = L.length ? `<thead><tr><th>Status</th><th>Kostenpost</th><th>Wat</th><th>Was (Exact)</th><th>Wordt</th><th>Reden</th><th>Door</th></tr></thead><tbody>${L.map(x => corrRow(x, false)).join('')}</tbody>` : `<tbody><tr><td class="empty">${f === 'open' ? 'Geen open correcties. ✓' : 'Geen correcties.'}</td></tr></tbody>`;
+  $('#tCorr').onchange = corrChange;
+}
+function bindCorr() {
+  if (bindCorr.done || !$('#corrF')) return; bindCorr.done = true;
+  $('#corrF').onchange = renderCorr;
+  $('#corrCsv').onclick = () => exportCsv('Lakenhuis_correcties_boekhouding_' + ymd(new Date()) + '.csv', ['status', 'kostenpost', 'boekstuk', 'wat', 'was (Exact)', 'wordt', 'reden', 'door', 'datum', 'aangepast in Exact door', 'aangepast op'],
+    CORR.slice().sort((a, b) => (a.done - b.done) || String(a.at).localeCompare(String(b.at))).map(x => [x.done ? 'aangepast in Exact' : 'nog aanpassen', x.desc, x.entry, CF[x.field] || x.field, cfv(x.field, x.old), cfv(x.field, x.new), x.reason, x.who, x.at, x.doneBy, x.doneAt]));
+  $('#corrPdf').onclick = () => {
+    const f = $('#corrF').value || 'open', L = CORR.filter(x => f === 'alle' || (f === 'open' ? !x.done : x.done)).sort((a, b) => (a.done - b.done) || String(a.at).localeCompare(String(b.at)));
+    $('#afrPdf').innerHTML = `<section class="orgpdf"><div class="ph"><div>Lakenhuis · VZW De Overmolen<h1>Correcties voor de boekhouding</h1>Graag aanpassen in Exact Online</div><div style="text-align:right">Opgemaakt op ${dfmt(ymd(new Date()))}<br>door ${esc($('#who').textContent)}<br>${L.filter(x => !x.done).length} open · ${L.filter(x => x.done).length} aangepast</div></div>
+      <p>Bij het nakijken van de afrekening zijn deze boekingen aangepast. Pas ze ook aan in Exact. Daarna vinkt u in de app <b>"Aangepast in Exact"</b> aan (tab Afrekening → Correcties voor de boekhouding).</p>
+      <table><thead><tr><th>Status</th><th>Kostenpost</th><th>Wat</th><th>Was (Exact)</th><th>Wordt</th><th>Reden</th><th>Door / datum</th></tr></thead><tbody>${L.map(x => `<tr><td style="color:${x.done ? '#1b7f3b' : '#b00020'};font-weight:700">${x.done ? '✓ aangepast' + (x.doneBy ? '<br><span class="sml">' + esc(x.doneBy) + ' ' + esc(x.doneAt) + '</span>' : '') : '● aanpassen'}</td><td>${esc(x.desc)}${x.entry ? '<br><span class="sml">boekstuk ' + esc(x.entry) + '</span>' : ''}</td><td>${esc(CF[x.field] || x.field)}</td><td>${esc(cfv(x.field, x.old))}</td><td><b>${esc(cfv(x.field, x.new))}</b></td><td>${esc(x.reason || '')}</td><td class="sml">${esc(x.who)}<br>${esc(x.at)}</td></tr>`).join('') || '<tr><td colspan="7">Geen correcties.</td></tr>'}</tbody></table>
+      <p class="pf">Rood = nog aan te passen in Exact · groen = aangepast. Lijst uit de app Lakenhuis Gebouwplan (SharePoint-lijst LK_Correcties).</p></section>`;
+    const t = document.title; document.title = 'Lakenhuis_correcties_boekhouding_' + ymd(new Date());
+    document.body.classList.add('print-org'); window.print(); setTimeout(() => { document.body.classList.remove('print-org'); document.title = t; }, 500);
+  };
+  document.addEventListener('click', e => { const b = e.target.closest('.cmk'); if (b) { e.preventDefault(); openCorr(b.dataset.cid); } });
 }
 // ---------- import Exact Online (export "FinTransactionSearch": CSV/TXT, tab of ; gescheiden, UTF-16 of UTF-8)
 const ORG_ALIAS = [[/accolage/i, 'Accolage'], [/huisartsenkring|\bbhak\b/i, 'BHAK'], [/ondersteuningsplan|^d\.?o\.?p\.?$/i, 'DOP'], [/huis voor gezondheid/i, 'Huis voor Gezondheid'], [/kenniscentrum|\bwwz\b/i, 'Kenniscentrum WWZ'], [/overmolen/i, 'De Overmolen']];

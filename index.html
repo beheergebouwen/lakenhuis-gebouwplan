@@ -177,6 +177,12 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 .imp-vo { max-width: 460px }
 #tAfr select.ce, #tAfr input.ce { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); max-width: 200px }
 #aSim { max-width: 260px }
+td.c-open { background: #fdecea !important; box-shadow: inset 3px 0 0 var(--bad) } td.c-done { background: #e7f5ec !important; box-shadow: inset 3px 0 0 var(--ok) }
+tr.c-open td { background: #fdecea } tr.c-done td { background: #e7f5ec }
+.cmk { border: 0; background: none; cursor: pointer; font-size: 13px; padding: 0 3px; font-weight: 700 } .cmk.open { color: var(--bad) } .cmk.done { color: var(--ok) }
+#corrPop { position: fixed; right: 16px; bottom: 16px; z-index: 50; width: min(860px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; background: var(--sheet); border: 2px solid var(--line-strong); border-radius: var(--r); padding: 12px 14px; box-shadow: 0 8px 30px rgba(0,0,0,.25) }
+#corrPop table { width: 100%; font-size: 12px } #tCorr input.creason, #corrPop input.creason { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper) }
+@media print { #corrPop { display: none !important } }
 #afrPdf .orgpdf { font-size: 12px; color: #000 }
 #afrPdf h1 { font-size: 20px; margin: 4px 0 2px } #afrPdf h2 { font-size: 14px; margin: 16px 0 6px }
 #afrPdf .ph { display: flex; justify-content: space-between; gap: 16px; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px }
@@ -278,6 +284,11 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
   <div class="cards" id="afrCards"></div>
   <div class="orgnew" id="afrNew"></div>
   <div class="tscroll"><table id="tAfr"></table></div>
+  <div class="tablebar" style="margin-top:18px"><h3 style="margin:0">Correcties voor de boekhouding</h3>
+    <select id="corrF" aria-label="Filter correcties"><option value="open">Nog aan te passen (rood)</option><option value="klaar">Aangepast in Exact (groen)</option><option value="alle">Alle</option></select>
+    <button class="btn" id="corrPdf">PDF voor de boekhouder</button><button class="btn" id="corrCsv">Exporteer (CSV)</button><span id="corrInfo"></span></div>
+  <p class="empty" style="font-size:12px;margin:0 0 6px">Elke wijziging aan een lijn uit Exact (categorie, periode, btw, sleutel, organisatie, verwijderen) komt hier automatisch. Schrijf de reden erbij. De boekhouder past het aan in Exact en vinkt "Aangepast in Exact" aan: rood wordt groen.</p>
+  <div class="tscroll"><table id="tCorr"></table></div>
   <h3 style="margin:18px 0 6px">Saldo per organisatie</h3>
   <p class="empty" style="font-size:12px;margin:0 0 6px">Aandeel kosten in de periode min de voorschotten (Exact, rekening 702000, dagboek HUUR) met boekdatum in de periode.</p>
   <div class="tscroll"><table id="tSaldo"></table></div>
@@ -314,9 +325,10 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 
 
 <div id="afrPdf" hidden></div>
+<div id="corrPop" hidden role="dialog" aria-label="Correcties"></div>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-<script src="config.js?v=39"></script>
-<script src="graph.js?v=41"></script>
-<script src="app.js?v=42"></script>
+<script src="config.js?v=40"></script>
+<script src="graph.js?v=43"></script>
+<script src="app.js?v=43"></script>
 </body>
 </html>
