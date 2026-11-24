@@ -179,6 +179,7 @@ table.occ input { font: inherit; font-size: 12px; padding: 2px 4px; border: 1px 
 #aSim { max-width: 260px }
 td.c-open { background: #fdecea !important; box-shadow: inset 3px 0 0 var(--bad) } td.c-done { background: #e7f5ec !important; box-shadow: inset 3px 0 0 var(--ok) }
 tr.c-open td { background: #fdecea } tr.c-done td { background: #e7f5ec }
+#tAfr td.c-open, #tAfr td.c-done { cursor: pointer } #tAfr td.c-open:hover { outline: 2px solid var(--bad); outline-offset: -2px } #tAfr td.c-done:hover { outline: 2px solid var(--ok); outline-offset: -2px }
 .cmk { border: 0; background: none; cursor: pointer; font-size: 13px; padding: 0 3px; font-weight: 700 } .cmk.open { color: var(--bad) } .cmk.done { color: var(--ok) }
 #corrPop { position: fixed; right: 16px; bottom: 16px; z-index: 50; width: min(860px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; background: var(--sheet); border: 2px solid var(--line-strong); border-radius: var(--r); padding: 12px 14px; box-shadow: 0 8px 30px rgba(0,0,0,.25) }
 #corrPop table { width: 100%; font-size: 12px } #tCorr input.creason, #corrPop input.creason { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper) }
@@ -329,6 +330,6 @@ tr.c-open td { background: #fdecea } tr.c-done td { background: #e7f5ec }
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
 <script src="config.js?v=40"></script>
 <script src="graph.js?v=43"></script>
-<script src="app.js?v=43"></script>
+<script src="app.js?v=44"></script>
 </body>
 </html>

@@ -818,7 +818,7 @@ function bindCorr() {
     const t = document.title; document.title = 'Lakenhuis_correcties_boekhouding_' + ymd(new Date());
     document.body.classList.add('print-org'); window.print(); setTimeout(() => { document.body.classList.remove('print-org'); document.title = t; }, 500);
   };
-  document.addEventListener('click', e => { const b = e.target.closest('.cmk'); if (b) { e.preventDefault(); openCorr(b.dataset.cid); } });
+  document.addEventListener('click', e => { const b = e.target.closest('.cmk'); if (b) { e.preventDefault(); openCorr(b.dataset.cid); return; } const td = e.target.closest('#tAfr td.c-open, #tAfr td.c-done'); if (td && !e.target.closest('select,input,label,option,button')) openCorr(td.closest('tr').dataset.id); });
 }
 // ---------- import Exact Online (export "FinTransactionSearch": CSV/TXT, tab of ; gescheiden, UTF-16 of UTF-8)
 const ORG_ALIAS = [[/accolage/i, 'Accolage'], [/huisartsenkring|\bbhak\b/i, 'BHAK'], [/ondersteuningsplan|^d\.?o\.?p\.?$/i, 'DOP'], [/huis voor gezondheid/i, 'Huis voor Gezondheid'], [/kenniscentrum|\bwwz\b/i, 'Kenniscentrum WWZ'], [/overmolen/i, 'De Overmolen']];
