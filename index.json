@@ -1,7 +1,7 @@
 {
- "bron": "Statbel - gezondheidsindex, basis 2013 = 100",
- "tabel": "https://bestat.statbel.fgov.be/bestat/api/views/d9a303dc-d393-4686-8fe2-234e03a857b8/result/EMBEDDED_HTML",
- "bijgewerkt": "2026-11-17",
+ "bron": "Statbel be.STAT - gezondheidsindex, basis 2013 = 100",
+ "bestand": "https://bestat.statbel.fgov.be/bestat/api/views/e8fad1c0-5270-4d62-9118-0999ee8cb323/result/JSON",
+ "bijgewerkt": "2026-11-27",
  "index2013": {
   "2024-12": 133.73,
   "2025-01": 135.52,
@@ -25,6 +25,7 @@
   "2026-07": 139.96,
   "2026-08": 140.3,
   "2026-09": 140.67,
-  "2026-10": 141.91
+  "2026-10": 141.91,
+  "2026-11": 142.9
  }
 }
