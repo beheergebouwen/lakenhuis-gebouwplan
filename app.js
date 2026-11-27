@@ -734,7 +734,7 @@ function renderAfr() {
     if ((f === 'from' && el.value > (c.to || '9')) || (f === 'to' && el.value < (c.from || '0'))) { setStatus('ro', "'Tot' ligt vóór 'Van' – niet opgeslagen"); renderAfr(); return; }
     const before = { ...c };
     try { await LK.save('costs', patch); Object.assign(c, patch); PSC = {}; if (c.src === 'Exact' && /cat|key|org/.test(f)) { learn(c, { cat: c.cat, key: c.key, org: c.key === KEYS[3] ? c.org : '' }); saveRules(); }
-      for (const k of Object.keys(patch)) if (k !== '_id' && String(before[k] ?? '') !== String(c[k] ?? '')) await logCorr(c, k, before[k], c[k]);
+      const kv = o => (o.key || KDEF) + (o.key === KEYS[3] && o.org ? ': ' + o.org : ''); for (const k of Object.keys(patch)) if (!['_id', 'key', 'org'].includes(k) && String(before[k] ?? '') !== String(c[k] ?? '')) await logCorr(c, k, before[k], c[k]); if ('key' in patch || 'org' in patch) await logCorr(c, 'key', kv(before), kv(c));
       renderAfr(); setStatus('live', 'Kostenpost aangepast · herberekend · ' + new Date().toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })); }
     catch (er) { setStatus('ro', 'Niet opgeslagen: ' + (er.status === 403 ? 'geen bewerkrechten' : er.message)); renderAfr(); }
   };
