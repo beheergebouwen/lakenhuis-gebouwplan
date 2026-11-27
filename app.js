@@ -1305,7 +1305,10 @@ async function syncIxs() {
     if (have.has(k)) continue; const L = letterData(w.org, w.A, today); if (!L || L.missing || L.A !== w.A) continue;
     const ch = L.rows.filter(x => x.changed); if (!ch.length) continue;
     const details = ch.map(x => `Contract vanaf ${dfmt(x.r.from)}${x.r.parent ? ' (addendum)' : ''}: ${eur2(Number(x.r.base))} × ${fmtIdx(x.s.idx)} (index ${ymName(x.s.idxMonth)}) ÷ ${fmtIdx(x.bi)} = ${eur2(x.now)} per maand (was ${eur2(x.old)})`).join('\n');
-    add.push({ key: k, building: BLD, org: w.org, date: dfmt(w.A), old: r2e(L.total - L.diffM), new: L.total, diff: L.diffM, details, done: false, doneBy: '', doneAt: '' });
+    const link = location.origin + location.pathname, oldT = r2e(L.total - L.diffM), tr = (a, b) => `<tr><td style="padding:3px 12px 3px 0">${a}</td><td style="padding:3px 0">${b}</td></tr>`;
+    const subject = `Indexatie huur ${BLD} – ${w.org} vanaf ${dfmt(w.A)}`;
+    const mail = `<p>Beste,</p><p>Door de nieuwe gezondheidsindex verandert de huur van <b>${esc(w.org)}</b> in <b>${esc(BLD)}</b>.</p><table style="border-collapse:collapse">${tr('Gebouw', '<b>' + esc(BLD) + '</b>')}${tr('Organisatie', '<b>' + esc(w.org) + '</b>')}${tr('Vanaf', '<b>' + dfmt(w.A) + '</b>')}${tr('Oude huur per maand', eur2(oldT))}${tr('Nieuwe huur per maand', '<b>' + eur2(L.total) + '</b>')}${tr('Verschil per maand', eur2(L.diffM))}</table><p><b>Berekening</b><br>${esc(details).replace(/\n/g, '<br>')}</p><p>Wil je de huurfactuur aanpassen in Exact? Vink daarna "Verwerkt" aan in de app (tab Huur &amp; index):<br><a href="${link}">${link}</a></p><p>Met vriendelijke groeten,<br>Patrimoniumbeheer – VZW De Overmolen</p>`;
+    add.push({ key: k, building: BLD, org: w.org, date: dfmt(w.A), old: oldT, new: L.total, diff: L.diffM, details, subject, mail, done: false, doneBy: '', doneAt: '' });
   }
   if (!add.length) return; ixsBusy = true;
   try { for (const o of add) { await LK.save('ixs', o); IXS.push(o); } setStatus('live', add.length + ' nieuwe indexatie(s) gemeld aan de boekhouding'); if (!$('#v-huur').hidden) renderHuur(); }
