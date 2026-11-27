@@ -1,7 +1,7 @@
 // Data layer: Microsoft 365 login (MSAL) + SharePoint lists via Microsoft Graph.
 (function () {
   const C = window.LK_CONFIG;
-  C.lists.reads = C.lists.reads || 'LK_IstaStanden'; C.lists.corr = C.lists.corr || 'LK_Correcties';
+  C.lists.reads = C.lists.reads || 'LK_IstaStanden'; C.lists.corr = C.lists.corr || 'LK_Correcties'; C.lists.ixs = C.lists.ixs || 'LK_Indexaties';
   const SCOPES = ['Sites.ReadWrite.All', 'User.Read'];
   const msal = new window.msal.PublicClientApplication({
     auth: { clientId: C.clientId, authority: 'https://login.microsoftonline.com/' + C.tenantId, redirectUri: location.origin + location.pathname.replace(/index\.html$/, '') },
@@ -38,6 +38,7 @@
     rent:    { org: 'Title', from: 'Van', to: 'Tot', base: 'Beginhuur', baseIdx: 'Beginindex', idxMonth: 'Indexmaand', m2: 'M2Contract', note: 'Opmerking', email: 'Email', parent: 'HoofdContract' },
     idx:     { month: 'Title', value: 'Index2013', src: 'Bron' },
     reads:   { nr: 'Title', pkey: 'Periode', units: 'Verbruik', note: 'Opmerking' },
+    ixs:     { key: 'Title', org: 'Organisatie', date: 'Vanaf', old: 'OudeHuur', new: 'NieuweHuur', diff: 'Verschil', details: 'Details', done: 'Verwerkt', doneBy: 'VerwerktDoor', doneAt: 'VerwerktOp' },
     corr:    { cid: 'Title', desc: 'Kostenpost', entry: 'Boekstuk', field: 'Veld', old: 'OudeWaarde', new: 'NieuweWaarde', reason: 'Reden', who: 'Door', at: 'Tijdstip', done: 'AangepastExact', doneBy: 'ExactDoor', doneAt: 'ExactTijdstip' },
     settings:{ key: 'Title', period: 'Periode', heatCost: 'Verwarmingskost', totalUnits: 'EenhedenTotaal', rentTotal: 'HuurVerdelers', meterCount: 'AantalMeters', rules: 'Regels' }
   };
@@ -52,6 +53,7 @@
     meters: [t('IstaUnit'), t('IstaCode'), t('IstaRuimte'), t('OudeStand', 'number'), t('NieuweStand', 'number'), t('Verbruik', 'number'), t('RuimteCode'), { name: 'Opmerking', text: { allowMultipleLines: true } }],
     orgs: [t('Kleur'), t('Soort')],
     reads: [t('Periode'), t('Verbruik', 'number'), { name: 'Opmerking', text: { allowMultipleLines: true } }],
+    ixs: [t('Organisatie'), t('Vanaf'), t('OudeHuur', 'number'), t('NieuweHuur', 'number'), t('Verschil', 'number'), { name: 'Details', text: { allowMultipleLines: true } }, t('Verwerkt', 'boolean'), t('VerwerktDoor'), t('VerwerktOp')],
     corr: [t('Kostenpost'), t('Boekstuk'), t('Veld'), t('OudeWaarde'), t('NieuweWaarde'), { name: 'Reden', text: { allowMultipleLines: true } }, t('Door'), t('Tijdstip'), t('AangepastExact', 'boolean'), t('ExactDoor'), t('ExactTijdstip')],
     settings: [t('Periode'), t('Verwarmingskost', 'number'), t('EenhedenTotaal', 'number'), t('HuurVerdelers', 'number'), t('AantalMeters', 'number')]
   };

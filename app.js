@@ -64,15 +64,16 @@ async function boot() {
   setInterval(() => { if (!document.hidden && !document.activeElement?.closest('form,select,input,textarea')) reload().then(() => renderAll(true)); }, 60000);
 }
 async function reload(first) {
-  const [rooms, doors, meters, orgs, settings, occ, costs, vo, imp, rent, idx, reads, corr] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ', 'costs', 'vo', 'imp', 'rent', 'idx', 'reads', 'corr'].map(k => LK.load(k).catch(() => null)));
+  const [rooms, doors, meters, orgs, settings, occ, costs, vo, imp, rent, idx, reads, corr, ixs] = await Promise.all(['rooms', 'doors', 'meters', 'orgs', 'settings', 'occ', 'costs', 'vo', 'imp', 'rent', 'idx', 'reads', 'corr', 'ixs'].map(k => LK.load(k).catch(() => null)));
   CORR = (corr || []).filter(x => x.cid && x.field); CORR_OK = !!corr;
+  IXS = (ixs || []).filter(x => x.key); IXS_OK = !!ixs;
   READS = {}; READS_OK = !!reads; for (const r of reads || []) if (r.nr && r.pkey) (READS[r.pkey] || (READS[r.pkey] = {}))[r.nr] = r;
   COSTS = costs || []; VOS = (vo || []).filter(v => v.org); IMPS = imp || [];
   RENT = (rent || []).filter(r => r.org); IDX_ITEMS = (idx || []).filter(x => x.month && x.value !== ''); IDX = Object.fromEntries(IDX_ITEMS.map(x => [x.month, Number(x.value)]));
   // index.json wordt elke dag automatisch bijgewerkt vanuit Statbel (GitHub Action); ontbrekende maanden aanvullen + bewaren in LK_Index
   try { const j = await (await fetch('index.json?t=' + Date.now(), { cache: 'no-store' })).json(); IDX_AUTO = j.index2013 || {}; IDX_UPD = j.bijgewerkt || ''; } catch (e) { IDX_AUTO = {}; }
   for (const [k, v] of Object.entries(IDX_AUTO)) if (!(k in IDX)) IDX[k] = Number(v);
-  syncIdx();
+  syncIdx(); syncIxs();
   OCC = (occ || []).filter(o => o.room && o.org);
   if (!rooms) { setStatus('ro', 'Lijsten niet gevonden'); const n = $('#notice'); n.hidden = false; n.textContent = 'De SharePoint-lijsten bestaan nog niet. Laat IT eenmalig setup/ uitvoeren (zie handleiding).'; throw new Error('no lists'); }
   S.rooms = Object.fromEntries(rooms.map(r => [r.code, r])); S.doors = Object.fromEntries(doors.map(d => [d.code, d]));
@@ -1281,6 +1282,7 @@ function renderHuur() {
   };
   // indexlijst
   const ks = Object.keys(IDX).sort().reverse();
+  renderIxs();
   { const ia = $('#idxAuto'); if (ia) ia.textContent = 'automatisch via Statbel · dagelijks gecontroleerd' + (IDX_UPD ? ' · laatst bijgewerkt ' + dfmt(IDX_UPD) : ''); }
   $('#tIdx').innerHTML = `<thead><tr><th>Maand</th><th class="num">Gezondheidsindex (2013 = 100)</th></tr></thead><tbody>` + ks.slice(0, 24).map(k => `<tr><td>${ymName(k)}</td><td class="num mono">${fmtIdx(IDX[k])}</td></tr>`).join('') + '</tbody>';
   $('#idxNew').innerHTML = canWrite ? `<b>Index toevoegen</b> <input type="month" id="iMon"> <input id="iVal" placeholder="bv. 141,91" inputmode="decimal" style="width:100px"> <button class="btn" id="iAdd">Opslaan</button> <a href="https://statbel.fgov.be/nl/themas/consumptieprijsindex/gezondheidsindex" target="_blank" rel="noopener">Statbel</a> <span id="iMsg"></span>` : '';
@@ -1288,6 +1290,40 @@ function renderHuur() {
     const m = $('#iMon').value, v = num($('#iVal').value); if (!m || !(v > 0)) { $('#iMsg').className = 'err'; $('#iMsg').textContent = 'Maand en index invullen'; return; }
     try { const ex = IDX_ITEMS.find(x => x.month === m); const o = { ...(ex ? { _id: ex._id } : {}), month: m, value: v, src: 'Manueel' }; await LK.save('idx', o); if (!ex) IDX_ITEMS.push(o); else ex.value = v; IDX[m] = v; renderHuur(); }
     catch (e) { $('#iMsg').className = 'err'; $('#iMsg').textContent = 'Niet opgeslagen: ' + e.message; }
+  };
+}
+// ---------- Indexaties voor de boekhouding (LK_Indexaties): nieuwe huur na indexatie → Power Automate mailt de boekhouder bij elke nieuwe lijn
+let IXS = [], IXS_OK = false, ixsBusy = false;
+const r2e = v => Math.round(v * 100) / 100;
+async function syncIxs() {
+  if (!canWrite || !IXS_OK || ixsBusy) return;
+  const today = ymd(new Date()), from = addDays(today, -45), to = addDays(today, 62), want = new Map();
+  for (const r of RENT) for (const s of rentSteps(r, to)) if (s.date >= from && s.rent != null) want.set(r.org + '|' + s.date, { org: r.org, A: s.date });
+  const have = new Set(IXS.map(x => x.key)), add = [];
+  for (const [k, w] of want) {
+    if (have.has(k)) continue; const L = letterData(w.org, w.A, today); if (!L || L.missing || L.A !== w.A) continue;
+    const ch = L.rows.filter(x => x.changed);
+    const details = ch.map(x => `Contract vanaf ${dfmt(x.r.from)}${x.r.parent ? ' (addendum)' : ''}: ${eur2(Number(x.r.base))} × ${fmtIdx(x.s.idx)} (index ${ymName(x.s.idxMonth)}) ÷ ${fmtIdx(x.bi)} = ${eur2(x.now)} per maand (was ${eur2(x.old)})`).join('\n');
+    add.push({ key: k, org: w.org, date: dfmt(w.A), old: r2e(L.total - L.diffM), new: L.total, diff: L.diffM, details, done: false, doneBy: '', doneAt: '' });
+  }
+  if (!add.length) return; ixsBusy = true;
+  try { for (const o of add) { await LK.save('ixs', o); IXS.push(o); } setStatus('live', add.length + ' nieuwe indexatie(s) gemeld aan de boekhouding'); if (!$('#v-huur').hidden) renderHuur(); }
+  catch (e) { console.warn('LK_Indexaties niet bijgewerkt', e); } finally { ixsBusy = false; }
+}
+function renderIxs() {
+  const t = $('#tIxs'); if (!t) return;
+  if (!IXS_OK) { t.innerHTML = '<tbody><tr><td class="imp-warn">De lijst LK_Indexaties bestaat nog niet in SharePoint.</td></tr></tbody>'; return; }
+  const L = IXS.slice().sort((a, b) => (a.done - b.done) || String(b.key.split('|')[1]).localeCompare(String(a.key.split('|')[1])));
+  $('#ixsInfo').innerHTML = `<b class="${L.some(x => !x.done) ? 'err' : 'saved'}" style="font-size:13px">${L.filter(x => !x.done).length} nog te verwerken</b> · <span class="saved" style="font-size:13px">${L.filter(x => x.done).length} verwerkt</span>`;
+  t.innerHTML = L.length ? `<thead><tr><th>Status</th><th>Organisatie</th><th>Vanaf</th><th class="num">Oude huur / maand</th><th class="num">Nieuwe huur / maand</th><th class="num">Verschil</th><th>Berekening</th></tr></thead><tbody>${L.map(x => `<tr data-k="${esc(x._id)}" class="${x.done ? 'c-done' : 'c-open'}">
+    <td><span class="check"><input type="checkbox" class="ixdone"${x.done ? ' checked' : ''} aria-label="Verwerkt door de boekhouding"> ${x.done ? 'Verwerkt' : '<b>Te verwerken</b>'}</span>${x.done && x.doneBy ? `<br><span class="empty" style="font-size:11px">${esc(x.doneBy)} · ${esc(x.doneAt)}</span>` : ''}</td>
+    <td><b>${esc(x.org)}</b></td><td class="mono">${esc(x.date)}</td><td class="num mono">${eur2(Number(x.old) || 0)}</td><td class="num mono"><b>${eur2(Number(x.new) || 0)}</b></td><td class="num mono">${eur2(Number(x.diff) || 0)}</td>
+    <td class="wrap" style="font-size:12px;white-space:pre-line">${esc(x.details)}</td></tr>`).join('')}</tbody>` : '<tbody><tr><td class="empty">Nog geen indexaties gemeld. Een nieuwe lijn komt hier vanzelf als een nieuwe index er is.</td></tr></tbody>';
+  t.onchange = async e => {
+    const cb = e.target.closest('input.ixdone'); if (!cb) return; const x = IXS.find(y => String(y._id) === cb.closest('tr').dataset.k); if (!x) return;
+    const ch = cb.checked ? { done: true, doneBy: $('#who').textContent, doneAt: nowTxt() } : { done: false, doneBy: '', doneAt: '' };
+    try { await LK.save('ixs', { _id: x._id, ...ch }); Object.assign(x, ch); } catch (er) { setStatus('ro', 'Niet bewaard: ' + (er.status === 403 ? 'geen rechten op LK_Indexaties' : er.message)); }
+    renderIxs();
   };
 }
 let IDX_ITEMS = [], IDX_AUTO = {}, IDX_UPD = '', idxSyncing = false;
